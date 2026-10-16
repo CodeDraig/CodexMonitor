@@ -583,7 +583,7 @@ pub(crate) async fn set_codex_feature_flag(
         return Ok(());
     }
 
-    config::write_feature_enabled(feature_key.as_str(), enabled)
+    codex_core::set_feature_flag_core(&state.sessions, feature_key.as_str(), enabled).await
 }
 
 #[tauri::command]

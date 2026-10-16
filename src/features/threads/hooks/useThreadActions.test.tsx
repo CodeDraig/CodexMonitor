@@ -298,9 +298,10 @@ describe("useThreadActions", () => {
       threadId: "thread-2",
     });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "setThreadItems",
+      type: "hydrateThreadItems",
       threadId: "thread-2",
       items: [assistantItem],
+      baselineItems: [],
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "markReviewing",
@@ -547,17 +548,9 @@ describe("useThreadActions", () => {
       await resumePromise;
     });
 
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "markProcessing",
-      threadId: "thread-1",
-      isProcessing: true,
-      timestamp: expect.any(Number),
-    });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "setActiveTurnId",
-      threadId: "thread-1",
-      turnId: "turn-local",
-    });
+    // Live events already installed this state; a stale snapshot must not rewrite it.
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "markProcessing" }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setActiveTurnId" }));
   });
 
   it("hydrates processing state from in-progress turns on resume", async () => {

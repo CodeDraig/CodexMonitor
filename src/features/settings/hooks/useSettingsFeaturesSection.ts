@@ -17,6 +17,7 @@ const HIDDEN_DYNAMIC_FEATURE_KEYS = new Set<string>([
   "personality",
   "collab",
   "steer",
+  "collaboration_modes",
 ]);
 
 export type SettingsFeaturesSectionProps = {
@@ -124,12 +125,6 @@ function mapFeatureToAppSettings(
 ): AppSettings | null {
   if (featureKey === "apps") {
     return { ...appSettings, experimentalAppsEnabled: enabled };
-  }
-  if (featureKey === "collaboration_modes") {
-    return { ...appSettings, collaborationModesEnabled: enabled };
-  }
-  if (featureKey === "steer") {
-    return { ...appSettings, steerEnabled: enabled };
   }
   if (featureKey === "unified_exec") {
     return { ...appSettings, unifiedExecEnabled: enabled };
@@ -256,10 +251,9 @@ export const useSettingsFeaturesSection = ({
             feature.name,
             nextEnabled,
           );
+          await setCodexFeatureFlag(feature.name, nextEnabled);
           if (nextSettings) {
             await onUpdateAppSettings(nextSettings);
-          } else {
-            await setCodexFeatureFlag(feature.name, nextEnabled);
           }
           setFeatures((current) =>
             current.map((item) =>

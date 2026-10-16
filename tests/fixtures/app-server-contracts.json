@@ -1,0 +1,14 @@
+{
+  "InitializeParams": [{"clientInfo":{"name":"codex_monitor","title":"Codex Monitor","version":"0.7.68"},"capabilities":{"experimentalApi":true}}],
+  "ThreadResumeParams": [{"threadId":"thread","excludeTurns":true}],
+  "ThreadForkParams": [{"threadId":"thread","excludeTurns":true}],
+  "ThreadTurnsListParams": [{"threadId":"thread","cursor":null,"limit":50,"sortDirection":"asc","itemsView":"full"}],
+  "ThreadStartParams": [{"cwd":"/tmp/codex-monitor","approvalPolicy":"on-request"}],
+  "TurnStartParams": [{"threadId":"thread","input":[{"type":"text","text":"hello"}],"cwd":"/tmp/codex-monitor","approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite","writableRoots":["/tmp/codex-monitor"],"networkAccess":true},"model":null,"effort":null}],
+  "TurnSteerParams": [{"threadId":"thread","expectedTurnId":"turn","input":[{"type":"text","text":"follow-up"}]}],
+  "PermissionsRequestApprovalResponse": [{"permissions":{},"scope":"turn"},{"permissions":{"fileSystem":{"read":["/tmp/one"]}},"scope":"turn"},{"permissions":{"network":{"enabled":true}},"scope":"session"}],
+  "CommandExecutionRequestApprovalResponse": [{"decision":"accept"},{"decision":"decline"},{"decision":"acceptForSession"},{"decision":"cancel"}],
+  "FileChangeRequestApprovalResponse": [{"decision":"accept"},{"decision":"decline"}],
+  "McpServerElicitationRequestResponse": [{"action":"accept","content":{"count":3,"enabled":false}},{"action":"accept"},{"action":"decline"},{"action":"cancel"}],
+  "ExperimentalFeatureEnablementSetParams": [{"enablement":{"apps":true}}]
+}

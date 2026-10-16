@@ -391,6 +391,16 @@ export type ApprovalRequest = {
   params: Record<string, unknown>;
 };
 
+export type ApprovalDecision = "accept" | "decline" | {
+  permissions: Record<string, unknown>;
+  scope: "turn" | "session";
+} | {
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, unknown>;
+} | {
+  decision: string | Record<string, unknown>;
+};
+
 export type RequestUserInputOption = {
   label: string;
   description: string;
@@ -623,6 +633,9 @@ export type AppMention = {
 };
 
 export type ModelOption = {
+  inputModalities?: string[];
+  serviceTiers?: { id: string; name: string }[];
+  additionalSpeedTiers?: string[];
   id: string;
   model: string;
   displayName: string;

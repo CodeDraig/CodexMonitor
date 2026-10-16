@@ -81,6 +81,7 @@ export function parseModelListResponse(response: unknown): ModelOption[] {
         return null;
       }
       const record = item as Record<string, unknown>;
+      if (record.hidden === true) return null;
       const modelSlug = String(record.model ?? record.id ?? "");
       const rawDisplayName = String(record.displayName || record.display_name || "");
       const displayName = rawDisplayName.trim().length > 0 ? rawDisplayName : modelSlug;
@@ -94,6 +95,12 @@ export function parseModelListResponse(response: unknown): ModelOption[] {
           record.defaultReasoningEffort ?? record.default_reasoning_effort,
         ),
         isDefault: Boolean(record.isDefault ?? record.is_default ?? false),
+        ...(Array.isArray(record.inputModalities) ? { inputModalities: record.inputModalities.filter((value): value is string => typeof value === "string") } : {}),
+        ...(Array.isArray(record.additionalSpeedTiers) ? { additionalSpeedTiers: record.additionalSpeedTiers.filter((value): value is string => typeof value === "string") } : {}),
+        ...(Array.isArray(record.serviceTiers) ? { serviceTiers: record.serviceTiers.flatMap((value) => {
+          if (!value || typeof value !== "object" || typeof value.id !== "string") return [];
+          return [{ id: value.id, name: String(value.name ?? value.id) }];
+        }) } : {}),
       } satisfies ModelOption;
     })
     .filter((model): model is ModelOption => model !== null);

@@ -31,7 +31,7 @@ describe("useThreadApprovalEvents", () => {
     const approval: ApprovalRequest = {
       workspace_id: "ws-1",
       request_id: 42,
-      method: "approval/request",
+      method: "item/commandExecution/requestApproval",
       params: { argv: ["git", "status"] },
     };
 
@@ -61,7 +61,7 @@ describe("useThreadApprovalEvents", () => {
     const approval: ApprovalRequest = {
       workspace_id: "ws-1",
       request_id: 7,
-      method: "approval/request",
+      method: "item/commandExecution/requestApproval",
       params: { argv: ["git", "pull"] },
     };
 

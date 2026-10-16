@@ -96,7 +96,7 @@ export function SettingsFeaturesSection({
   return (
     <SettingsSection
       title="Features"
-      subtitle="Manage stable and experimental Codex features."
+      subtitle="Manage Codex features. Apps and plugins apply immediately; other changes apply after restarting CodexMonitor."
     >
       <SettingsToggleRow
         title="Config file"
@@ -111,31 +111,6 @@ export function SettingsFeaturesSection({
         title="Stable Features"
         subtitle="Production-ready features enabled by default."
       />
-      <SettingsToggleRow
-        title="Personality"
-        subtitle={
-          <>
-            Choose Codex communication style (writes top-level <code>personality</code> in
-            config.toml).
-          </>
-        }
-      >
-        <select
-          id="features-personality-select"
-          className="settings-select"
-          value={appSettings.personality}
-          onChange={(event) =>
-            void onUpdateAppSettings({
-              ...appSettings,
-              personality: event.target.value as (typeof appSettings)["personality"],
-            })
-          }
-          aria-label="Personality"
-        >
-          <option value="friendly">Friendly</option>
-          <option value="pragmatic">Pragmatic</option>
-        </select>
-      </SettingsToggleRow>
       <SettingsToggleRow
         title="Pause queued messages when a response is required"
         subtitle="Keep queued messages paused while Codex is waiting for plan accept/changes or your answers."

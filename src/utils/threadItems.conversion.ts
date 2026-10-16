@@ -2,6 +2,10 @@ import type { ConversationItem } from "../types";
 import { parseCollabToolCallItem } from "./threadItems.collab";
 import { asNumber, asString } from "./threadItems.shared";
 
+function displayValue(value: unknown): string {
+  return value == null ? "" : typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
 function extractImageInputValue(input: Record<string, unknown>) {
   const value =
     asString(input.url ?? "") ||
@@ -154,7 +158,7 @@ export function buildConversationItem(
       title: `Tool: ${server}${tool ? ` / ${tool}` : ""}`,
       detail: args,
       status: asString(item.status ?? ""),
-      output: asString(item.result ?? item.error ?? ""),
+      output: displayValue(item.result ?? item.error),
     };
   }
   if (type === "collabToolCall" || type === "collabAgentToolCall") {
@@ -203,7 +207,37 @@ export function buildConversationItem(
       text: asString(item.review ?? ""),
     };
   }
-  return null;
+  if (type === "subAgentActivity") {
+    const receiver = { threadId: asString(item.agentThreadId), nickname: asString(item.agentPath) || undefined };
+    return {
+      id, kind: "tool", toolType: "collabToolCall", title: "Agent activity",
+      detail: asString(item.agentPath), output: displayValue(item.kind),
+      collabReceiver: receiver, collabReceivers: [receiver],
+    };
+  }
+  if (type === "imageGeneration" && item.result && !item.failure) {
+    const result = asString(item.result);
+    return { id, kind: "message", role: "assistant", text: asString(item.revisedPrompt),
+      images: [result.startsWith("data:image/") ? result : `data:image/png;base64,${result}`] };
+  }
+  if (type === "imageGeneration") {
+    return { id, kind: "tool", toolType: type, title: "Image generation", detail: asString(item.revisedPrompt),
+      status: asString(item.status), output: displayValue(item.failure) };
+  }
+  if (type === "dynamicToolCall" || type === "functionCallOutput") {
+    return { id, kind: "tool", toolType: type, title: `Tool: ${[item.namespace, item.tool ?? item.name].filter(Boolean).join(" / ")}`,
+      detail: displayValue(item.arguments), status: asString(item.status ?? "completed"),
+      output: displayValue(item.contentItems ?? item.output), durationMs: asNumber(item.durationMs) };
+  }
+  if (type === "hookPrompt") {
+    return { id, kind: "tool", toolType: type, title: "Hook instructions", detail: "", output: displayValue(item.fragments), status: "completed" };
+  }
+  if (type === "sleep") {
+    return { id, kind: "tool", toolType: type, title: "Waiting", detail: `${asNumber(item.durationMs) ?? 0} ms`,
+      status: asString(item.status), durationMs: asNumber(item.durationMs) };
+  }
+  // Keep future protocol items inspectable instead of silently erasing them.
+  return { id, kind: "tool", toolType: type, title: type, detail: "", output: displayValue(item), status: asString(item.status) };
 }
 
 export function buildConversationItemFromThreadItem(

@@ -8,7 +8,13 @@ export const SUPPORTED_APP_SERVER_METHODS = [
   "codex/backgroundThread",
   "codex/connected",
   "codex/event/skills_update_available",
+  "skills/changed",
   "error",
+  "configWarning",
+  "warning",
+  "deprecationNotice",
+  "mcpServer/startupStatus/updated",
+  "model/rerouted",
   "hook/completed",
   "hook/started",
   "item/agentMessage/delta",
@@ -16,12 +22,16 @@ export const SUPPORTED_APP_SERVER_METHODS = [
   "item/commandExecution/terminalInteraction",
   "item/completed",
   "item/fileChange/outputDelta",
+  "item/fileChange/patchUpdated",
+  "item/mcpToolCall/progress",
   "item/plan/delta",
   "item/reasoning/summaryPartAdded",
   "item/reasoning/summaryTextDelta",
   "item/reasoning/textDelta",
   "item/started",
   "item/tool/requestUserInput",
+  "mcpServer/elicitation/request",
+  "serverRequest/resolved",
   "thread/archived",
   "thread/closed",
   "thread/name/updated",
@@ -40,6 +50,7 @@ export type SupportedAppServerMethod = (typeof SUPPORTED_APP_SERVER_METHODS)[num
 export const METHODS_HANDLED_OUTSIDE_USE_APP_SERVER_EVENTS = [
   "app/list/updated",
   "codex/event/skills_update_available",
+  "skills/changed",
 ] as const satisfies readonly SupportedAppServerMethod[];
 
 const SUPPORTED_METHOD_SET = new Set<string>(SUPPORTED_APP_SERVER_METHODS);
@@ -105,7 +116,8 @@ export function isApprovalRequestMethod(method: string): boolean {
 }
 
 export function isSkillsUpdateAvailableEvent(event: AppServerEvent): boolean {
-  return getAppServerRawMethod(event) === "codex/event/skills_update_available";
+  const method = getAppServerRawMethod(event);
+  return method === "skills/changed" || method === "codex/event/skills_update_available";
 }
 
 export function isAppListUpdatedEvent(event: AppServerEvent): boolean {

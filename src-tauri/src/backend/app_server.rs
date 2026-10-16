@@ -94,6 +94,7 @@ fn extract_related_thread_ids(value: &Value) -> Vec<String> {
         let Some(container) = container.and_then(|value| value.as_object()) else {
             return;
         };
+        push_thread_id(out, container.get("agentThreadId"));
         push_thread_id(out, container.get("threadId").or_else(|| container.get("thread_id")));
         push_thread_id(
             out,
@@ -431,8 +432,20 @@ fn build_initialize_params(client_version: &str) -> Value {
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
+fn validate_initialize_response(response: &Value) -> Result<(), String> {
+    if let Some(error) = response.get("error") {
+        let message = error.get("message").and_then(Value::as_str).unwrap_or("Unknown server error");
+        return Err(format!("Codex app-server rejected initialization: {message}"));
+    }
+    if !response.get("result").is_some_and(Value::is_object) {
+        return Err("Codex app-server returned an invalid initialization response".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) struct WorkspaceSession {
     pub(crate) codex_args: Option<String>,
+    pub(crate) activity: Mutex<crate::shared::session_activity::SessionActivity>,
     pub(crate) child: Mutex<Child>,
     pub(crate) stdin: Mutex<ChildStdin>,
     pub(crate) pending: Mutex<HashMap<u64, oneshot::Sender<Value>>>,
@@ -503,6 +516,13 @@ impl WorkspaceSession {
         params: Value,
     ) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        // This reservation shares a lock with runtime replacement. Keep it even
+        // after a timeout/write failure: the server may have accepted the request.
+        self.activity.lock().await.begin_request(
+            id,
+            method,
+            extract_thread_id(&json!({ "params": &params })),
+        )?;
         let (tx, rx) = oneshot::channel();
         self.register_workspace(workspace_id).await;
         self.pending.lock().await.insert(id, tx);
@@ -779,6 +799,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
         codex_args,
         child: Mutex::new(child),
         stdin: Mutex::new(stdin),
+        activity: Mutex::new(Default::default()),
         pending: Mutex::new(HashMap::new()),
         request_context: Mutex::new(HashMap::new()),
         thread_workspace: Mutex::new(HashMap::new()),
@@ -824,6 +845,11 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
 
             // Check if this event is for a background thread
             let thread_id = extract_thread_id(&value);
+            session_clone
+                .activity
+                .lock()
+                .await
+                .observe(&value, thread_id.clone());
             let mut request_workspace: Option<String> = None;
             let mut request_method: Option<String> = None;
             if let Some(id) = maybe_id {
@@ -1087,7 +1113,11 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
             );
         }
     };
-    init_response?;
+    if let Err(error) = init_response.and_then(|response| validate_initialize_response(&response)) {
+        let mut child = session.child.lock().await;
+        kill_child_process_tree(&mut child).await;
+        return Err(error);
+    }
     session.send_notification("initialized", None).await?;
 
     let payload = AppServerEvent {
@@ -1104,6 +1134,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
 
 #[cfg(test)]
 mod tests {
+    use super::validate_initialize_response;
     use super::{
         build_initialize_params, extract_related_thread_ids, extract_thread_entries_from_thread_list_result,
         extract_thread_id, normalize_root_path, resolve_workspace_for_cwd,
@@ -1112,6 +1143,14 @@ mod tests {
     };
     use std::collections::HashMap;
     use serde_json::json;
+
+    #[test]
+    fn initialization_requires_a_successful_rpc_result() {
+        assert!(validate_initialize_response(&json!({"result": {"userAgent": "codex"}})).is_ok());
+        let error = validate_initialize_response(&json!({"error": {"code": -32600, "message": "Unsupported client"}})).unwrap_err();
+        assert!(error.contains("Unsupported client"));
+        assert!(validate_initialize_response(&json!({"id": 1})).is_err());
+    }
 
     #[test]
     fn extract_thread_id_reads_camel_case() {

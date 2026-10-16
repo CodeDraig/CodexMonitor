@@ -106,7 +106,8 @@ fn build_clone_destination_path_sanitizes_and_uniquifies() {
     let copies_folder = temp_dir.join("copies");
     std::fs::create_dir_all(&copies_folder).expect("create copies folder");
 
-    let first = build_clone_destination_path(&copies_folder, "feature/new-thing");
+    let first =
+        build_clone_destination_path(&copies_folder, "feature/new-thing").expect("available path");
     assert!(first.starts_with(&copies_folder));
     assert_eq!(
         first.file_name().and_then(|name| name.to_str()),
@@ -115,7 +116,8 @@ fn build_clone_destination_path_sanitizes_and_uniquifies() {
 
     std::fs::create_dir_all(&first).expect("create first clone folder");
 
-    let second = build_clone_destination_path(&copies_folder, "feature/new-thing");
+    let second =
+        build_clone_destination_path(&copies_folder, "feature/new-thing").expect("available path");
     assert!(second.starts_with(&copies_folder));
     assert_ne!(first, second);
     assert_eq!(

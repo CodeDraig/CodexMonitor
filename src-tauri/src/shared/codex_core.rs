@@ -1,3 +1,24 @@
+mod history;
+
+pub(crate) async fn set_feature_flag_core(
+    sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
+    feature_key: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    codex_config::write_feature_enabled(feature_key, enabled)?;
+    if matches!(feature_key, "apps" | "plugins") {
+        let mut seen = HashSet::new();
+        let active: Vec<_> = sessions.lock().await.values()
+            .filter(|session| seen.insert(Arc::as_ptr(session) as usize)).cloned().collect();
+        for session in active {
+            let response = session.send_request("experimentalFeature/enablement/set", json!({"enablement": {feature_key: enabled}})).await
+                .map_err(|error| format!("Feature saved, but runtime update failed: {error}. Restart CodexMonitor to apply it."))?;
+            history::rpc_result(&response).map_err(|error| format!("Feature saved, but runtime update failed: {error}. Restart CodexMonitor to apply it."))?;
+        }
+    }
+    Ok(())
+}
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -270,10 +291,17 @@ pub(crate) async fn resume_thread_core(
     thread_id: String,
 ) -> Result<Value, String> {
     let session = get_session_clone(sessions, &workspace_id).await?;
-    let params = json!({ "threadId": thread_id });
-    session
-        .send_request_for_workspace(&workspace_id, "thread/resume", params)
-        .await
+    let mut response = session.send_request_for_workspace(
+        &workspace_id, "thread/resume", json!({ "threadId": thread_id, "excludeTurns": true }),
+    ).await?;
+    history::rpc_result(&response)?;
+    let turns = history::load_turns(&thread_id, |params| {
+        session.send_request_for_workspace(&workspace_id, "thread/turns/list", params)
+    }).await?;
+    let thread = response.get_mut("result").and_then(|result| result.get_mut("thread"))
+        .and_then(Value::as_object_mut).ok_or("Codex resume response is missing its thread")?;
+    thread.insert("turns".to_string(), Value::Array(turns));
+    Ok(response)
 }
 
 pub(crate) async fn read_thread_core(
@@ -296,7 +324,23 @@ pub(crate) async fn thread_live_subscribe_core(
     if thread_id.trim().is_empty() {
         return Err("threadId is required".to_string());
     }
-    let _ = get_session_clone(sessions, &workspace_id).await?;
+    let session = get_session_clone(sessions, &workspace_id).await?;
+    // This stdio connection owns every loaded session. A just-created thread
+    // has no rollout yet and must not be resumed before its first user turn.
+    let mut cursor = None::<String>;
+    let mut seen = HashSet::new();
+    loop {
+        let response = session.send_request_for_workspace(&workspace_id, "thread/loaded/list", json!({"cursor": cursor, "limit": 100})).await?;
+        let result = history::rpc_result(&response)?;
+        if result.get("data").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(thread_id.as_str()))) {
+            return Ok(());
+        }
+        cursor = result.get("nextCursor").and_then(Value::as_str).map(str::to_string);
+        let Some(next) = cursor.as_ref() else { break };
+        if !seen.insert(next.clone()) { return Err("Loaded thread pagination repeated a cursor".into()); }
+    }
+    let response = session.send_request_for_workspace(&workspace_id, "thread/resume", json!({"threadId": thread_id, "excludeTurns": true})).await?;
+    history::rpc_result(&response)?;
     Ok(())
 }
 
@@ -308,6 +352,8 @@ pub(crate) async fn thread_live_unsubscribe_core(
     if thread_id.trim().is_empty() {
         return Err("threadId is required".to_string());
     }
+    // Detach the foreground view only. The shared connection must continue
+    // receiving background turns and approval requests for every workspace.
     let _ = get_session_clone(sessions, &workspace_id).await?;
     Ok(())
 }
@@ -318,7 +364,7 @@ pub(crate) async fn fork_thread_core(
     thread_id: String,
 ) -> Result<Value, String> {
     let session = get_session_clone(sessions, &workspace_id).await?;
-    let params = json!({ "threadId": thread_id });
+    let params = json!({ "threadId": thread_id, "excludeTurns": true });
     session
         .send_request_for_workspace(&workspace_id, "thread/fork", params)
         .await
@@ -596,9 +642,19 @@ pub(crate) async fn model_list_core(
     workspace_id: String,
 ) -> Result<Value, String> {
     let session = get_session_clone(sessions, &workspace_id).await?;
-    session
-        .send_request_for_workspace(&workspace_id, "model/list", json!({}))
-        .await
+    let mut data = Vec::new();
+    let mut cursor = None::<String>;
+    let mut seen = HashSet::new();
+    loop {
+        let response = session.send_request_for_workspace(&workspace_id, "model/list", json!({"cursor": cursor, "limit": 100})).await?;
+        let result = history::rpc_result(&response)?;
+        let page = result.get("data").and_then(Value::as_array).ok_or("Codex model list is missing data")?;
+        data.extend(page.iter().cloned());
+        cursor = result.get("nextCursor").and_then(Value::as_str).map(str::to_string);
+        let Some(next) = cursor.as_ref() else { break };
+        if !seen.insert(next.clone()) { return Err("Codex model pagination repeated a cursor".into()); }
+    }
+    Ok(json!({"result": {"data": data, "nextCursor": null}}))
 }
 
 pub(crate) async fn experimental_feature_list_core(

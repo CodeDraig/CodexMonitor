@@ -5,7 +5,7 @@ description: Maintain CodexMonitor and Codex app-server protocol parity. Use whe
 
 # App-Server Events Sync
 
-Use this skill to keep CodexMonitor app-server integration accurate as `../Codex` evolves.
+Use this skill to keep CodexMonitor app-server integration accurate as the installed Codex CLI evolves.
 
 ## Canonical Source
 
@@ -17,7 +17,8 @@ Treat that file as the canonical runbook and update it when behavior changes.
 ## Workflow
 
 1. Confirm upstream baseline:
-- Read Codex hash from `../Codex` and update the hash in `docs/app-server-events.md` title.
+- Record `codex --version` and generate experimental schemas into a fresh temporary directory. Use the selected executable as the compatibility target.
+- If `../Codex` exists, record its checked-out hash without fetching or pruning. A sibling checkout is optional.
 
 2. Compare notification methods:
 - Diff Codex v2 notification method set against CodexMonitor routing in `src/utils/appServerEvents.ts` and `src/features/app/hooks/useAppServerEvents.ts`.
@@ -28,7 +29,7 @@ Treat that file as the canonical runbook and update it when behavior changes.
 - Update `Supported Requests`, `Missing Client Requests`, and `Server Requests` sections.
 
 4. Investigate schema drift when lists look unchanged:
-- Inspect v2 payload structs in `../Codex/codex-rs/app-server-protocol/src/protocol/v2.rs`.
+- Inspect generated JSON schemas; if using upstream source, inspect `codex-rs/app-server-protocol/src/protocol/v2/`.
 - Compare parser and normalization edges in `src/utils/appServerEvents.ts`, `src/features/app/hooks/useAppServerEvents.ts`, and `src/features/threads/utils/threadNormalize.ts`.
 
 5. Implement support when requested:
@@ -38,6 +39,7 @@ Treat that file as the canonical runbook and update it when behavior changes.
 - Keep app/daemon parity and avoid duplicated logic.
 
 6. Validate:
+- Run `python3 scripts/check-codex-protocol.py --schema-dir <generated-directory>` (Python jsonschema required).
 - Run targeted tests for touched files.
 - Run `npm run typecheck`.
 - Run `npm run test` for frontend behavior changes.

@@ -40,8 +40,6 @@ pub(crate) fn unique_worktree_path_best_effort(base_dir: &PathBuf, name: &str) -
     candidate
 }
 
-// Used by daemon-only worktree creation paths.
-#[allow(dead_code)]
 pub(crate) fn unique_worktree_path_strict(
     base_dir: &PathBuf,
     name: &str,
@@ -86,9 +84,12 @@ pub(crate) fn unique_worktree_path_for_rename(
     ))
 }
 
-pub(crate) fn build_clone_destination_path(copies_folder: &PathBuf, copy_name: &str) -> PathBuf {
+pub(crate) fn build_clone_destination_path(
+    copies_folder: &PathBuf,
+    copy_name: &str,
+) -> Result<PathBuf, String> {
     let safe_name = sanitize_clone_dir_name(copy_name);
-    unique_worktree_path_best_effort(copies_folder, &safe_name)
+    unique_worktree_path_strict(copies_folder, &safe_name)
 }
 
 pub(crate) fn null_device_path() -> &'static str {
@@ -96,5 +97,26 @@ pub(crate) fn null_device_path() -> &'static str {
         "NUL"
     } else {
         "/dev/null"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clone_destination_exhaustion_preserves_all_occupied_paths() {
+        let root = std::env::temp_dir().join(format!("clone-exhaustion-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("copy")).unwrap();
+        std::fs::write(root.join("copy/sentinel"), "preserve").unwrap();
+        for index in 2..1000 {
+            std::fs::create_dir(root.join(format!("copy-{index}"))).unwrap();
+        }
+        assert!(build_clone_destination_path(&root, "copy").is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.join("copy/sentinel")).unwrap(),
+            "preserve"
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 999);
     }
 }

@@ -40,6 +40,40 @@ const makeOptions = (
 });
 
 describe("useQueuedSend", () => {
+  it.each(["/status", "/fast status", "/apps", "/mcp"])(
+    "continues the queue after local command %s without a turn event",
+    async (command) => {
+      const options = makeOptions({ isProcessing: true });
+      const { result, rerender } = renderHook((props) => useQueuedSend(props), {
+        initialProps: options,
+      });
+      await act(async () => {
+        await result.current.queueMessage(command);
+        await result.current.queueMessage("Next message");
+      });
+      await act(async () => { rerender({ ...options, isProcessing: false }); });
+      expect(options.sendUserMessage).toHaveBeenCalledExactlyOnceWith("Next message", []);
+      expect(result.current.activeQueue).toHaveLength(0);
+    },
+  );
+
+  it("waits for a local command promise before draining the next item", async () => {
+    let finish!: () => void;
+    const options = makeOptions({
+      isProcessing: true,
+      startStatus: vi.fn(() => new Promise<void>((resolve) => { finish = resolve; })),
+    });
+    const { result, rerender } = renderHook((props) => useQueuedSend(props), { initialProps: options });
+    await act(async () => {
+      await result.current.queueMessage("/status");
+      await result.current.queueMessage("Next message");
+    });
+    await act(async () => { rerender({ ...options, isProcessing: false }); });
+    expect(options.sendUserMessage).not.toHaveBeenCalled();
+    await act(async () => { finish(); });
+    expect(options.sendUserMessage).toHaveBeenCalledExactlyOnceWith("Next message", []);
+  });
+
   it("sends queued messages one at a time after processing completes", async () => {
     const options = makeOptions();
     const { result, rerender } = renderHook(

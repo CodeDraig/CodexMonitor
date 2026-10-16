@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ConversationItem } from "../types";
 import {
   buildConversationItem,
+  buildItemsFromThread,
   buildConversationItemFromThreadItem,
   getThreadCreatedTimestamp,
   getThreadTimestamp,
@@ -915,4 +916,25 @@ describe("threadItems", () => {
     expect(timestamp).toBe(Date.parse("2025-01-01T00:00:00Z"));
   });
 
+});
+
+
+describe("current app-server item variants", () => {
+  it.each([
+    { type: "hookPrompt", fragments: [{ hookRunId: "h", text: "instructions" }] },
+    { type: "functionCallOutput", name: "read", output: "result" },
+    { type: "dynamicToolCall", tool: "local_tool", arguments: {}, contentItems: [{ type: "inputText", text: "result" }], status: "completed" },
+    { type: "subAgentActivity", agentPath: "/root/child", agentThreadId: "child", kind: "started" },
+    { type: "sleep", durationMs: 1000 },
+    { type: "imageGeneration", result: "", status: "inProgress" },
+    { type: "futureItem", payload: "inspectable" },
+  ])("preserves $type in live and resumed conversations", (item) => {
+    expect(buildConversationItem({ id: "current-item", ...item })).not.toBeNull();
+    expect(buildItemsFromThread({ turns: [{ items: [{ id: "current-item", ...item }] }] })).toHaveLength(1);
+  });
+  it("renders generated image data using the existing image viewer", () => {
+    expect(buildConversationItem({ id: "image", type: "imageGeneration", result: "aW1hZ2U=", status: "completed" })).toMatchObject({
+      kind: "message", role: "assistant", images: ["data:image/png;base64,aW1hZ2U="],
+    });
+  });
 });

@@ -254,11 +254,7 @@ export function useRemoteThreadLiveConnection({
           }
 
           activeSubscriptionKeyRef.current = targetKey;
-          if (shouldResume || !shouldKeepLiveState) {
-            setState("polling");
-          } else {
-            setState("live");
-          }
+          setState("live");
           return true;
         } catch {
           if (sequence === reconnectSequenceRef.current) {
@@ -360,7 +356,7 @@ export function useRemoteThreadLiveConnection({
         const threadId = extractThreadId(method, params);
         if (threadId === selectedThreadId) {
           activeSubscriptionKeyRef.current = keyForThread(activeWorkspaceId, threadId);
-          setState(connectionStateRef.current === "polling" ? "polling" : "live");
+          setState("live");
         }
         return;
       }

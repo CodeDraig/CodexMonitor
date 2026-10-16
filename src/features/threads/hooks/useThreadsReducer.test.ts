@@ -4,6 +4,18 @@ import { initialState, threadReducer } from "./useThreadsReducer";
 import type { ThreadState } from "./useThreadsReducer";
 
 describe("threadReducer", () => {
+  it("merges live deltas received during history loading without resurrecting unchanged removed items", () => {
+    const baseline: ConversationItem[] = [{ id: "old", kind: "message", role: "assistant", text: "removed remotely" }];
+    const live = threadReducer({ ...initialState, itemsByThread: { t: baseline } }, {
+      type: "appendAgentDelta", workspaceId: "ws", threadId: "t", itemId: "new", delta: "Hello live", hasCustomName: true,
+    });
+    const hydrated = threadReducer(live, {
+      type: "hydrateThreadItems", threadId: "t", baselineItems: baseline,
+      items: [{ id: "new", kind: "message", role: "assistant", text: "Hello" }],
+    });
+    expect(hydrated.itemsByThread.t).toEqual([{ id: "new", kind: "message", role: "assistant", text: "Hello live" }]);
+  });
+
   it("ensures thread with default name and active selection", () => {
     const next = threadReducer(initialState, {
       type: "ensureThread",

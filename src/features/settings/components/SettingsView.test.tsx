@@ -40,6 +40,7 @@ vi.mock("@services/tauri", async () => {
     getModelList: vi.fn(),
     getConfigModel: vi.fn(),
     getExperimentalFeatureList: vi.fn(),
+    setCodexFeatureFlag: vi.fn().mockResolvedValue(undefined),
     getAgentsSettings: vi.fn(),
     isMobileRuntime: vi.fn(),
     listWorkspaces: vi.fn(),
@@ -1691,19 +1692,9 @@ describe("SettingsView Codex defaults", () => {
 });
 
 describe("SettingsView Features", () => {
-  it("updates personality selection", async () => {
-    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
-    renderFeaturesSection({ onUpdateAppSettings });
-
-    fireEvent.change(screen.getByLabelText("Personality"), {
-      target: { value: "pragmatic" },
-    });
-
-    await waitFor(() => {
-      expect(onUpdateAppSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ personality: "pragmatic" }),
-      );
-    });
+  it("does not offer the removed personality control", () => {
+    renderFeaturesSection({});
+    expect(screen.queryByLabelText("Personality")).toBeNull();
   });
 
   it("hides steer mode dynamic feature row", async () => {

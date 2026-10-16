@@ -1,3 +1,4 @@
+import type { ApprovalDecision } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Options as NotificationOptions } from "@tauri-apps/plugin-notification";
@@ -527,12 +528,12 @@ export async function startReview(
 export async function respondToServerRequest(
   workspaceId: string,
   requestId: number | string,
-  decision: "accept" | "decline",
+  decision: ApprovalDecision,
 ) {
   return invoke("respond_to_server_request", {
     workspaceId,
     requestId,
-    result: { decision },
+    result: typeof decision === "string" ? { decision } : decision,
   });
 }
 

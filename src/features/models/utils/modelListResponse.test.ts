@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { parseModelListResponse } from "./modelListResponse";
 
 describe("parseModelListResponse", () => {
+  it("keeps advertised input capabilities and excludes hidden models", () => {
+    const models = parseModelListResponse({ data: [
+      { id: "visible", inputModalities: ["text"], serviceTiers: [{ id: "priority", name: "Fast" }], additionalSpeedTiers: ["fast"] },
+      { id: "hidden", hidden: true },
+    ] });
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({ inputModalities: ["text"], serviceTiers: [{ id: "priority", name: "Fast" }], additionalSpeedTiers: ["fast"] });
+  });
+
   it("uses displayName when present", () => {
     const response = {
       result: {

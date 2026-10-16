@@ -1,3 +1,6 @@
+import type { ApprovalDecision } from "@/types";
+import { PermissionRequestForm, ElicitationRequestForm } from "./ServerRequestForm";
+import { pushErrorToast } from "@services/toasts";
 import { useEffect, useMemo } from "react";
 import type { ApprovalRequest, WorkspaceInfo } from "../../../types";
 import { getApprovalCommandInfo } from "../../../utils/approvalRules";
@@ -14,7 +17,7 @@ import {
 type ApprovalToastsProps = {
   approvals: ApprovalRequest[];
   workspaces: WorkspaceInfo[];
-  onDecision: (request: ApprovalRequest, decision: "accept" | "decline") => void;
+  onDecision: (request: ApprovalRequest, decision: ApprovalDecision) => void;
   onRemember?: (request: ApprovalRequest, command: string[]) => void;
 };
 
@@ -32,7 +35,8 @@ export function ApprovalToasts({
   const primaryRequest = approvals[approvals.length - 1];
 
   useEffect(() => {
-    if (!primaryRequest) {
+    if (!primaryRequest || primaryRequest.method === "item/permissions/requestApproval" || primaryRequest.method === "mcpServer/elicitation/request"
+      || (Array.isArray(primaryRequest.params.availableDecisions) && !primaryRequest.params.availableDecisions.includes("accept"))) {
       return;
     }
 
@@ -51,7 +55,7 @@ export function ApprovalToasts({
         return;
       }
       event.preventDefault();
-      onDecision(primaryRequest, "accept");
+      void Promise.resolve(onDecision(primaryRequest, "accept")).catch((error) => pushErrorToast({ title: "Approval failed", message: String(error) }));
     };
 
     window.addEventListener("keydown", handler);
@@ -94,7 +98,8 @@ export function ApprovalToasts({
       {approvals.map((request) => {
         const workspaceName = workspaceLabels.get(request.workspace_id);
         const params = request.params ?? {};
-        const commandInfo = getApprovalCommandInfo(params);
+        const commandInfo = request.method === "item/commandExecution/requestApproval" && !params.networkApprovalContext && !params.additionalPermissions ? getApprovalCommandInfo(params) : null;
+        const decide = (decision: ApprovalDecision) => void Promise.resolve(onDecision(request, decision)).catch((error) => pushErrorToast({ title: "Approval failed", message: String(error) }));
         const entries = Object.entries(params);
         return (
           <ToastCard
@@ -109,6 +114,8 @@ export function ApprovalToasts({
               ) : null}
             </ToastHeader>
             <div className="approval-toast-method">{methodLabel(request.method)}</div>
+            {request.method === "item/permissions/requestApproval" ? <PermissionRequestForm request={request} onDecision={onDecision} />
+              : request.method === "mcpServer/elicitation/request" ? <ElicitationRequestForm request={request} onDecision={onDecision} /> : <>
             <div className="approval-toast-details">
               {entries.length ? (
                 entries.map(([key, value]) => {
@@ -137,9 +144,14 @@ export function ApprovalToasts({
               )}
             </div>
             <ToastActions className="approval-toast-actions">
+              {Array.isArray(params.availableDecisions) ? params.availableDecisions.map((decision, index) => <button key={index} className="secondary"
+                onClick={() => decide({ decision: decision as string | Record<string, unknown> })}>
+                {typeof decision === "string" ? ({ accept: "Approve", acceptForSession: "Approve for session", decline: "Decline", cancel: "Cancel" }[decision] ?? decision) : JSON.stringify(decision)}
+              </button>) : <>
+
               <button
                 className="secondary"
-                onClick={() => onDecision(request, "decline")}
+                onClick={() => decide("decline")}
               >
                 Decline
               </button>
@@ -154,11 +166,13 @@ export function ApprovalToasts({
               ) : null}
               <button
                 className="primary"
-                onClick={() => onDecision(request, "accept")}
+                onClick={() => decide("accept")}
               >
                 Approve (Enter)
               </button>
+              </>}
             </ToastActions>
+            </>}
           </ToastCard>
         );
       })}

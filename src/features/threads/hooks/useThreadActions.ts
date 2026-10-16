@@ -1,3 +1,4 @@
+import { pushErrorToast } from "@services/toasts";
 import { useCallback, useRef } from "react";
 import type { Dispatch, MutableRefObject } from "react";
 import type {
@@ -200,6 +201,8 @@ export function useThreadActions({
       if (!force && loadedThreadsRef.current[threadId]) {
         return threadId;
       }
+      const baselineItems = itemsByThread[threadId] ?? [];
+      const baselineTurnId = activeTurnIdByThreadRef.current[threadId];
       const status = threadStatusByIdRef.current[threadId];
       if (status?.isProcessing && loadedThreadsRef.current[threadId] && !force) {
         onDebug?.({
@@ -272,6 +275,9 @@ export function useThreadActions({
               payload: { workspaceId, threadId },
             });
           }
+          const liveStateChanged = activeTurnIdByThreadRef.current[threadId] !== baselineTurnId
+            || threadStatusByIdRef.current[threadId] !== status;
+          if (!liveStateChanged) {
           dispatch({
             type: "markProcessing",
             threadId,
@@ -288,11 +294,13 @@ export function useThreadActions({
             threadId,
             isReviewing: hydrationPlan.reviewing,
           });
+          }
           if (hydrationPlan.mergedItems.length > 0) {
             dispatch({
-              type: "setThreadItems",
+              type: "hydrateThreadItems",
               threadId,
               items: hydrationPlan.mergedItems,
+              baselineItems,
             });
           }
           if (hydrationPlan.threadName) {
@@ -324,6 +332,7 @@ export function useThreadActions({
           label: "thread/resume error",
           payload: error instanceof Error ? error.message : String(error),
         });
+        pushErrorToast({ title: "Could not load conversation", message: error instanceof Error ? error.message : String(error) });
         return null;
       } finally {
         const nextCount = Math.max(

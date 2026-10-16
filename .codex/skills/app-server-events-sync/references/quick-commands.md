@@ -1,31 +1,18 @@
-# Quick Commands
+# Protocol comparison commands
 
-Use these from repo root.
-
-## Baseline
+Run from the repository root. Use the executable configured in CodexMonitor if it differs from `codex`.
 
 ```bash
-git -C ../Codex rev-parse HEAD
+codex --version
+protocol_schema_dir=$(mktemp -d /tmp/codex-monitor-schema-XXXXXX)
+codex app-server generate-json-schema --experimental --out "$protocol_schema_dir"
+python3 scripts/check-codex-protocol.py --schema-dir "$protocol_schema_dir"
+rg -n 'SUPPORTED_APP_SERVER_METHODS' src/utils/appServerEvents.ts
+rg -n 'send_request' src-tauri/src/shared/codex_core.rs src-tauri/src/backend/app_server.rs
 ```
 
-## Notifications
+The schema check uses Python jsonschema. Inspect `ClientRequest.json`, `ServerRequest.json`, and `ServerNotification.json` in the generated directory for complete method sets; inspect individual response/parameter schemas for payload drift. Compare stable and experimental inventories separately.
 
-```bash
-(rg -N -o '=>\s*"[^"]+"\s*\(v2::[^)]*Notification\)' ../Codex/codex-rs/app-server-protocol/src/protocol/common.rs | sed -E 's/.*"([^"]+)".*/\1/'; printf '%s\n' 'account/login/completed') | sort -u
-rg -n "SUPPORTED_APP_SERVER_METHODS" src/utils/appServerEvents.ts
-```
+When an upstream checkout exists, use `git -C ../Codex rev-parse HEAD` to record it. Protocol declarations are in `codex-rs/app-server-protocol/src/protocol/common.rs` and `protocol/v2/`. No fetch, checkout, or prune is required.
 
-## Requests
-
-```bash
-awk '/client_request_definitions! \{/,/\/\/\/ DEPRECATED APIs below/' ../Codex/codex-rs/app-server-protocol/src/protocol/common.rs | rg -N -o '=>\s*"[^"]+"\s*\{' | sed -E 's/.*"([^"]+)".*/\1/' | sort -u
-awk '/server_request_definitions! \{/,/\/\/\/ DEPRECATED APIs below/' ../Codex/codex-rs/app-server-protocol/src/protocol/common.rs | rg -N -o '=>\s*"[^"]+"\s*\{' | sed -E 's/.*"([^"]+)".*/\1/' | sort -u
-perl -0777 -ne 'while(/send_request_for_workspace\(\s*&[^,]+\s*,\s*"([^"]+)"/g){print "$1\n"}' src-tauri/src/shared/codex_core.rs | sort -u
-```
-
-## Schema Drift
-
-```bash
-rg -n "struct .*Notification" ../Codex/codex-rs/app-server-protocol/src/protocol/v2.rs
-rg -n "enum ThreadItem|CommandExecution|FileChange|McpToolCall|EnteredReviewMode|ExitedReviewMode|ContextCompaction" ../Codex/codex-rs/app-server-protocol/src/protocol/v2.rs
-```
+Update `docs/app-server-events.md` after implementation. Run targeted tests, typecheck, the frontend suite, and Rust checks for changed backend behavior. Desktop acceptance is separate from schema and unit checks.

@@ -1,3 +1,4 @@
+import type { ApprovalDecision } from "@/types";
 import { useCallback, useRef } from "react";
 import type { Dispatch } from "react";
 import type { ApprovalRequest, DebugEntry } from "@/types";
@@ -36,12 +37,13 @@ export function useThreadApprovals({ dispatch, onDebug }: UseThreadApprovalsOpti
   }, []);
 
   const handleApprovalDecision = useCallback(
-    async (request: ApprovalRequest, decision: "accept" | "decline") => {
-      await respondToServerRequest(
-        request.workspace_id,
-        request.request_id,
-        decision,
-      );
+    async (request: ApprovalRequest, decision: ApprovalDecision) => {
+      const result = request.method === "item/permissions/requestApproval" && typeof decision === "string"
+        ? { permissions: decision === "accept" ? (request.params.permissions as Record<string, unknown> ?? {}) : {}, scope: "turn" as const }
+        : request.method === "mcpServer/elicitation/request" && typeof decision === "string"
+          ? { action: decision }
+          : decision;
+      await respondToServerRequest(request.workspace_id, request.request_id, result);
       dispatch({
         type: "removeApproval",
         requestId: request.request_id,

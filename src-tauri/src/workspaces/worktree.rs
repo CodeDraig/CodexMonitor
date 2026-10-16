@@ -24,6 +24,9 @@ pub(crate) fn unique_worktree_path_for_rename(
 }
 
 #[cfg(test)]
-pub(crate) fn build_clone_destination_path(copies_folder: &PathBuf, copy_name: &str) -> PathBuf {
+pub(crate) fn build_clone_destination_path(
+    copies_folder: &PathBuf,
+    copy_name: &str,
+) -> Result<PathBuf, String> {
     worktree_core::build_clone_destination_path(copies_folder, copy_name)
 }

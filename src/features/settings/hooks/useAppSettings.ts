@@ -256,6 +256,8 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
       DEFAULT_CODE_FONT_FAMILY,
     ),
     codeFontSize: clampCodeFontSize(settings.codeFontSize),
+    steerEnabled: true,
+    collaborationModesEnabled: true,
     personality: allowedPersonality.has(settings.personality)
       ? settings.personality
       : "friendly",

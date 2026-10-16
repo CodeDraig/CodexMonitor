@@ -43,6 +43,29 @@ async function mount(handlers: Handlers) {
 }
 
 describe("useAppServerEvents", () => {
+  it("routes elicitation and resolution using the JSON-RPC request id", async () => {
+    const onApprovalRequest = vi.fn();
+    const onServerRequestResolved = vi.fn();
+    const { root } = await mount({ onApprovalRequest, onServerRequestResolved });
+    const params = { threadId: "t", mode: "form", message: "Input" };
+    act(() => listener?.({ workspace_id: "ws", message: { id: "rpc-12", method: "mcpServer/elicitation/request", params } }));
+    expect(onApprovalRequest).toHaveBeenCalledWith({ workspace_id: "ws", request_id: "rpc-12", method: "mcpServer/elicitation/request", params });
+    act(() => listener?.({ workspace_id: "ws", message: { method: "serverRequest/resolved", params: { requestId: "rpc-12", threadId: "t" } } }));
+    expect(onServerRequestResolved).toHaveBeenCalledWith("ws", "rpc-12");
+    await act(async () => root.unmount());
+  });
+
+  it("routes startup and runtime diagnostics", async () => {
+    const onDiagnostic = vi.fn();
+    const { root } = await mount({ onDiagnostic });
+    for (const method of ["configWarning", "warning", "deprecationNotice", "mcpServer/startupStatus/updated", "model/rerouted"]) {
+      const params = { message: "Configuration needs attention" };
+      act(() => listener?.({ workspace_id: "ws-1", message: { method, params } }));
+      expect(onDiagnostic).toHaveBeenCalledWith("ws-1", method, params);
+    }
+    await act(async () => root.unmount());
+  });
+
   it("routes app-server events to handlers", async () => {
     const handlers: Handlers = {
       onAppServerEvent: vi.fn(),

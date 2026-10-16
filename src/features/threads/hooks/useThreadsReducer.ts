@@ -106,6 +106,7 @@ export type ThreadAction =
       hasCustomName?: boolean;
     }
   | { type: "setThreadItems"; threadId: string; items: ConversationItem[] }
+  | { type: "hydrateThreadItems"; threadId: string; items: ConversationItem[]; baselineItems: ConversationItem[] }
   | {
       type: "appendReasoningSummary";
       threadId: string;

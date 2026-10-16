@@ -36,6 +36,7 @@ type HookEvent = {
 };
 
 type AppServerEventHandlers = {
+  onDiagnostic?: (workspaceId: string, method: string, params: Record<string, unknown>) => void;
   onWorkspaceConnected?: (workspaceId: string) => void;
   onThreadStarted?: (workspaceId: string, thread: Record<string, unknown>) => void;
   onThreadNameUpdated?: (
@@ -55,6 +56,7 @@ type AppServerEventHandlers = {
     threadId: string,
     action: string,
   ) => void;
+  onServerRequestResolved?: (workspaceId: string, requestId: string | number) => void;
   onApprovalRequest?: (request: ApprovalRequest) => void;
   onRequestUserInput?: (request: RequestUserInputRequest) => void;
   onAgentMessageDelta?: (event: AgentDelta) => void;
@@ -114,6 +116,11 @@ export const METHODS_ROUTED_IN_USE_APP_SERVER_EVENTS = [
   "codex/backgroundThread",
   "codex/connected",
   "error",
+  "configWarning",
+  "warning",
+  "deprecationNotice",
+  "mcpServer/startupStatus/updated",
+  "model/rerouted",
   "hook/completed",
   "hook/started",
   "item/agentMessage/delta",
@@ -121,12 +128,16 @@ export const METHODS_ROUTED_IN_USE_APP_SERVER_EVENTS = [
   "item/commandExecution/terminalInteraction",
   "item/completed",
   "item/fileChange/outputDelta",
+  "item/fileChange/patchUpdated",
+  "item/mcpToolCall/progress",
   "item/plan/delta",
   "item/reasoning/summaryPartAdded",
   "item/reasoning/summaryTextDelta",
   "item/reasoning/textDelta",
   "item/started",
   "item/tool/requestUserInput",
+  "mcpServer/elicitation/request",
+  "serverRequest/resolved",
   "thread/archived",
   "thread/closed",
   "thread/name/updated",
@@ -186,6 +197,11 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
       }
       const params = getAppServerParams(payload);
 
+      if (["configWarning", "warning", "deprecationNotice", "mcpServer/startupStatus/updated", "model/rerouted"].includes(method)) {
+        currentHandlers.onDiagnostic?.(workspace_id, method, params);
+        return;
+      }
+
       if (method === "codex/connected") {
         currentHandlers.onWorkspaceConnected?.(workspace_id);
         return;
@@ -194,7 +210,13 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
       const requestId = getAppServerRequestId(payload);
       const hasRequestId = requestId !== null;
 
-      if (isApprovalRequestMethod(method) && hasRequestId) {
+      if (method === "serverRequest/resolved") {
+        if (typeof params.requestId === "string" || typeof params.requestId === "number") {
+          currentHandlers.onServerRequestResolved?.(workspace_id, params.requestId);
+        }
+        return;
+      }
+      if ((isApprovalRequestMethod(method) || method === "mcpServer/elicitation/request") && hasRequestId) {
         currentHandlers.onApprovalRequest?.({
           workspace_id,
           request_id: requestId as string | number,
@@ -553,6 +575,22 @@ export function useAppServerEvents(handlers: AppServerEventHandlers) {
         return;
       }
 
+      if (method === "item/fileChange/patchUpdated") {
+        const threadId = String(params.threadId ?? "");
+        const itemId = String(params.itemId ?? "");
+        if (threadId && itemId && Array.isArray(params.changes)) {
+          currentHandlers.onItemStarted?.(workspace_id, threadId, { type: "fileChange", id: itemId, status: "inProgress", changes: params.changes });
+        }
+        return;
+      }
+      if (method === "item/mcpToolCall/progress") {
+        const threadId = String(params.threadId ?? "");
+        const itemId = String(params.itemId ?? "");
+        if (threadId && itemId && typeof params.message === "string") {
+          currentHandlers.onCommandOutputDelta?.(workspace_id, threadId, itemId, params.message + "\n");
+        }
+        return;
+      }
       if (method === "item/fileChange/outputDelta") {
         const threadId = String(params.threadId ?? params.thread_id ?? "");
         const itemId = String(params.itemId ?? params.item_id ?? "");

@@ -151,7 +151,7 @@ export function useThreadLinking({
     ) => {
       const itemType = asString(item?.type ?? "");
       const isCollabType =
-        itemType === "collabToolCall" || itemType === "collabAgentToolCall";
+        itemType === "collabToolCall" || itemType === "collabAgentToolCall" || itemType === "subAgentActivity";
       if (!isCollabType && !hasCollabLinkHints(item)) {
         return;
       }
@@ -162,6 +162,7 @@ export function useThreadLinking({
       }
       const receivers = Array.from(
         new Set([
+          ...normalizeStringList(item.agentThreadId),
           ...normalizeStringList(item.receiverThreadId ?? item.receiver_thread_id),
           ...normalizeStringList(item.receiverThreadIds ?? item.receiver_thread_ids),
           ...normalizeStringList(item.newThreadId ?? item.new_thread_id),

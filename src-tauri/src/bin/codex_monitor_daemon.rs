@@ -215,27 +215,7 @@ impl DaemonState {
             *workspaces = stored;
         }
 
-        let stale_sessions: Vec<(String, Arc<WorkspaceSession>)> = {
-            let mut sessions = self.sessions.lock().await;
-            sessions
-                .keys()
-                .filter(|id| !workspace_ids.contains(*id))
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .filter_map(|workspace_id| {
-                    sessions
-                        .remove(&workspace_id)
-                        .map(|session| (workspace_id, session))
-                })
-                .collect()
-        };
-
-        for (workspace_id, session) in stale_sessions {
-            let mut child = session.child.lock().await;
-            kill_child_process_tree(&mut child).await;
-            eprintln!("daemon: pruned stale session for removed workspace {workspace_id}");
-        }
+        workspaces_core::prune_workspace_sessions_core(&self.sessions, &workspace_ids).await;
     }
 
     async fn list_workspaces(&self) -> Vec<WorkspaceInfo> {
@@ -593,7 +573,7 @@ impl DaemonState {
         feature_key: String,
         enabled: bool,
     ) -> Result<(), String> {
-        codex_config::write_feature_enabled(feature_key.as_str(), enabled)
+        codex_core::set_feature_flag_core(&self.sessions, feature_key.as_str(), enabled).await
     }
 
     async fn get_agents_settings(&self) -> Result<agents_config_core::AgentsSettingsDto, String> {
@@ -1672,6 +1652,7 @@ mod tests {
             codex_args: None,
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
+            activity: Mutex::new(Default::default()),
             pending: Mutex::new(HashMap::new()),
             request_context: Mutex::new(HashMap::new()),
             thread_workspace: Mutex::new(HashMap::new()),
@@ -1818,6 +1799,87 @@ mod tests {
             );
 
             let _ = std::fs::remove_dir_all(&tmp);
+        });
+    }
+
+    #[test]
+    fn clone_persistence_failure_retains_checkout_and_shared_session() {
+        run_async_test(async {
+            let tmp = make_temp_dir("clone-persistence-failure");
+            let source = tmp.join("source");
+            std::fs::create_dir_all(&source).unwrap();
+            assert!(std::process::Command::new("git")
+                .args(["init"])
+                .current_dir(&source)
+                .output()
+                .unwrap()
+                .status
+                .success());
+            let entry = make_workspace_entry("source", &source.to_string_lossy());
+            let workspaces = Mutex::new(HashMap::from([("source".into(), entry.clone())]));
+            let session = make_session(entry);
+            let sessions = Mutex::new(HashMap::from([("source".into(), session.clone())]));
+            let settings = Mutex::new(AppSettings::default());
+            // An existing directory cannot be overwritten as workspaces.json.
+            let error = workspaces_core::add_clone_core(
+                "source".into(),
+                "copy".into(),
+                tmp.to_string_lossy().into(),
+                &workspaces,
+                &sessions,
+                &settings,
+                &tmp,
+                |_, _, _, _| async { panic!("must reuse shared session") },
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("retained"));
+            assert!(tmp.join("copy/.git").is_dir());
+            let error = workspaces_core::add_workspace_from_git_url_core(
+                source.to_string_lossy().into(),
+                tmp.to_string_lossy().into(),
+                Some("url-copy".into()),
+                &workspaces,
+                &sessions,
+                &settings,
+                &tmp,
+                |_, _, _, _| async { panic!("must reuse shared session") },
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("retained"));
+            assert!(tmp.join("url-copy/.git").is_dir());
+            assert_eq!(workspaces.lock().await.len(), 1);
+            assert_eq!(sessions.lock().await.len(), 1);
+            assert!(session.child.lock().await.try_wait().unwrap().is_none());
+            kill_child_process_tree(&mut *session.child.lock().await).await;
+        });
+    }
+
+    #[test]
+    fn list_workspaces_prunes_alias_without_killing_shared_process() {
+        run_async_test(async {
+            let tmp = make_temp_dir("prune-shared-alias");
+            let state = test_state(&tmp);
+            let keep = make_workspace_entry("keep", &tmp.to_string_lossy());
+            write_workspaces(&state.storage_path, &[keep.clone()]).unwrap();
+            let session = make_session(keep);
+            session.register_workspace("removed").await;
+            {
+                let mut sessions = state.sessions.lock().await;
+                sessions.insert("keep".into(), session.clone());
+                sessions.insert("removed".into(), session.clone());
+            }
+            let listed = state.list_workspaces().await;
+            assert_eq!(listed.len(), 1);
+            assert!(listed[0].connected);
+            assert_eq!(state.sessions.lock().await.len(), 1);
+            assert!(!session
+                .workspace_ids_snapshot()
+                .await
+                .contains(&"removed".into()));
+            assert!(session.child.lock().await.try_wait().unwrap().is_none());
+            kill_child_process_tree(&mut *session.child.lock().await).await;
         });
     }
 

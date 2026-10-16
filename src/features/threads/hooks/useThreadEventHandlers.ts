@@ -8,6 +8,7 @@ import type {
   RateLimitSnapshot,
   TurnPlan,
 } from "@/types";
+import { pushErrorToast } from "@services/toasts";
 import { getAppServerRawMethod } from "@utils/appServerEvents";
 import { useThreadApprovalEvents } from "./useThreadApprovalEvents";
 import { useThreadHookEvents } from "./useThreadHookEvents";
@@ -210,8 +211,25 @@ export function useThreadEventHandlers({
     [onDebug],
   );
 
+  const onDiagnostic = useCallback((workspaceId: string, method: string, params: Record<string, unknown>) => {
+    // Successful MCP startup is routine; failures must be visible without opening Debug.
+    if (method === "mcpServer/startupStatus/updated" && params.status !== "failed") return;
+    const message = [params.summary ?? params.message ?? params.error ?? params.reason, params.details]
+      .filter(Boolean).map((value) => typeof value === "string" ? value : JSON.stringify(value)).join("\n");
+    if (!message) return;
+    pushErrorToast({ title: method === "mcpServer/startupStatus/updated" ? "MCP server failed" : "Codex notice", message, durationMs: 15000 });
+    onDebug?.({ id: `${Date.now()}-${workspaceId}-diagnostic`, timestamp: Date.now(), source: "event", label: method, payload: params });
+  }, [onDebug]);
+
+  const onServerRequestResolved = useCallback((workspaceId: string, requestId: string | number) => {
+    dispatch({ type: "removeApproval", workspaceId, requestId });
+    dispatch({ type: "removeUserInputRequest", workspaceId, requestId });
+  }, [dispatch]);
+
   const handlers = useMemo(
     () => ({
+      onServerRequestResolved,
+      onDiagnostic,
       onWorkspaceConnected,
       onApprovalRequest,
       onRequestUserInput,
@@ -245,6 +263,8 @@ export function useThreadEventHandlers({
       onTurnError,
     }),
     [
+      onServerRequestResolved,
+      onDiagnostic,
       onWorkspaceConnected,
       onApprovalRequest,
       onRequestUserInput,

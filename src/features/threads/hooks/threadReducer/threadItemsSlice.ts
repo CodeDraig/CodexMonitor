@@ -1,5 +1,5 @@
 import type { ConversationItem } from "@/types";
-import { normalizeItem, prepareThreadItems, upsertItem } from "@utils/threadItems";
+import { normalizeItem, prepareThreadItems, upsertItem, mergeThreadItems } from "@utils/threadItems";
 import type { ThreadAction, ThreadState } from "../useThreadsReducer";
 import {
   addSummaryBoundary,
@@ -169,6 +169,18 @@ export function reduceThreadItems(state: ThreadState, action: ThreadAction): Thr
           [action.threadId]: updatedItems,
         },
         threadsByWorkspace: nextThreadsByWorkspace,
+      };
+    }
+    case "hydrateThreadItems": {
+      const baseline = new Map(action.baselineItems.map((item) => [item.id, item]));
+      const changedWhileLoading = (state.itemsByThread[action.threadId] ?? [])
+        .filter((item) => JSON.stringify(baseline.get(item.id)) !== JSON.stringify(item));
+      return {
+        ...state,
+        itemsByThread: {
+          ...state.itemsByThread,
+          [action.threadId]: prepareThreadItems(mergeThreadItems(action.items, changedWhileLoading), { maxItemsPerThread: state.maxItemsPerThread }),
+        },
       };
     }
     case "setThreadItems":

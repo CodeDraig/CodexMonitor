@@ -1,3 +1,4 @@
+import { pushErrorToast } from "@services/toasts";
 import {
   memo,
   useCallback,
@@ -63,7 +64,7 @@ type ComposerProps = {
   collaborationModes: { id: string; label: string }[];
   selectedCollaborationModeId: string | null;
   onSelectCollaborationMode: (id: string | null) => void;
-  models: { id: string; displayName: string; model: string }[];
+  models: { id: string; displayName: string; model: string; inputModalities?: string[] }[];
   selectedModelId: string | null;
   onSelectModel: (id: string) => void;
   reasoningOptions: string[];
@@ -397,6 +398,11 @@ export const Composer = memo(function Composer({
     if (!trimmed && attachedImages.length === 0) {
       return;
     }
+    const modalities = models.find((candidate) => candidate.id === selectedModelId)?.inputModalities;
+    if (attachedImages.length && modalities && !modalities.includes("image")) {
+      pushErrorToast({ title: "This model does not accept images", message: "Choose an image-capable model or remove the attachments." });
+      return;
+    }
     if (trimmed) {
       recordHistory(trimmed);
     }
@@ -410,6 +416,8 @@ export const Composer = memo(function Composer({
     setComposerText("");
     setAppMentionBindings([]);
   }, [
+    models,
+    selectedModelId,
     appMentionBindings,
     attachedImages,
     disabled,

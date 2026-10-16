@@ -106,6 +106,22 @@ where
     })
 }
 
+async fn clone_repository(
+    parent: &PathBuf,
+    source: &str,
+    destination: &PathBuf,
+) -> Result<(), String> {
+    git_core::run_git_command(parent, &["clone", source, &destination.to_string_lossy()])
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            format!(
+                "{error}. Clone destination retained if present: {}",
+                destination.display()
+            )
+        })
+}
+
 pub(crate) async fn add_clone_core<F, Fut>(
     source_workspace_id: String,
     copy_name: String,
@@ -155,19 +171,9 @@ where
     };
 
     let destination_path =
-        worktree_core::build_clone_destination_path(&copies_folder_path, &copy_name);
-    let destination_path_string = destination_path.to_string_lossy().to_string();
+        worktree_core::build_clone_destination_path(&copies_folder_path, &copy_name)?;
     let stored_destination_path = workspace_path_to_string(&destination_path);
-
-    if let Err(error) = git_core::run_git_command(
-        &copies_folder_path,
-        &["clone", &source_entry.path, &destination_path_string],
-    )
-    .await
-    {
-        let _ = tokio::fs::remove_dir_all(&destination_path).await;
-        return Err(error);
-    }
+    clone_repository(&copies_folder_path, &source_entry.path, &destination_path).await?;
 
     if let Some(origin_url) = git_core::git_get_origin_url(&PathBuf::from(&source_entry.path)).await
     {
@@ -220,8 +226,10 @@ where
         match spawn_session(entry.clone(), default_bin, codex_args, codex_home).await {
             Ok(session) => (session, true),
             Err(error) => {
-                let _ = tokio::fs::remove_dir_all(&destination_path).await;
-                return Err(error);
+                return Err(format!(
+                    "{error}. Clone destination retained if present: {}",
+                    destination_path.display()
+                ));
             }
         }
     };
@@ -240,8 +248,10 @@ where
             let mut child = session.child.lock().await;
             kill_child_process_tree(&mut child).await;
         }
-        let _ = tokio::fs::remove_dir_all(&destination_path).await;
-        return Err(error);
+        return Err(format!(
+            "{error}. Clone destination retained if present: {}",
+            destination_path.display()
+        ));
     }
 
     session
@@ -345,14 +355,8 @@ where
         }
     }
 
-    let clone_path_string = clone_path.to_string_lossy().to_string();
     let stored_clone_path = workspace_path_to_string(&clone_path);
-    if let Err(error) =
-        git_core::run_git_command(&destination_parent, &["clone", &url, &clone_path_string]).await
-    {
-        let _ = tokio::fs::remove_dir_all(&clone_path).await;
-        return Err(error);
-    }
+    clone_repository(&destination_parent, &url, &clone_path).await?;
 
     let workspace_name = clone_path
         .file_name()
@@ -385,8 +389,10 @@ where
         match spawn_session(entry.clone(), default_bin, codex_args, codex_home).await {
             Ok(session) => (session, true),
             Err(error) => {
-                let _ = tokio::fs::remove_dir_all(&clone_path).await;
-                return Err(error);
+                return Err(format!(
+                    "{error}. Clone destination retained if present: {}",
+                    clone_path.display()
+                ));
             }
         }
     };
@@ -405,8 +411,10 @@ where
             let mut child = session.child.lock().await;
             kill_child_process_tree(&mut child).await;
         }
-        let _ = tokio::fs::remove_dir_all(&clone_path).await;
-        return Err(error);
+        return Err(format!(
+            "{error}. Clone destination retained if present: {}",
+            clone_path.display()
+        ));
     }
 
     session
@@ -620,7 +628,111 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{default_repo_name_from_url, validate_target_folder_name};
+    use super::*;
+
+    fn clone_fixture() -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("clone-regression-{}", Uuid::new_v4()));
+        let source = root.join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        for args in [
+            vec!["init"],
+            vec![
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+        ] {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&source)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        (root, source)
+    }
+
+    #[test]
+    fn overlapping_clones_preserve_the_winning_checkout() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (root, source) = clone_fixture();
+            let first = worktree_core::build_clone_destination_path(&root, "copy").unwrap();
+            let second = worktree_core::build_clone_destination_path(&root, "copy").unwrap();
+            assert_eq!(first, second);
+            let source = source.to_string_lossy().to_string();
+            let (a, b) = futures_util::future::join(
+                clone_repository(&root, &source, &first),
+                clone_repository(&root, &source, &second),
+            )
+            .await;
+            assert_ne!(a.is_ok(), b.is_ok(), "exactly one clone should succeed");
+            assert!(first.join(".git").is_dir());
+            assert!(git_core::run_git_command(&first, &["rev-parse", "HEAD"])
+                .await
+                .is_ok());
+            let sentinel = first.join("sentinel");
+            std::fs::write(&sentinel, "keep").unwrap();
+            assert!(clone_repository(&root, &source, &first).await.is_err());
+            assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "keep");
+        });
+    }
+
+    #[test]
+    fn both_clone_entrypoints_retain_checkout_when_session_spawn_fails() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (root, source) = clone_fixture();
+            let entry = WorkspaceEntry {
+                id: "source".into(),
+                name: "source".into(),
+                path: source.to_string_lossy().into(),
+                kind: WorkspaceKind::Main,
+                parent_id: None,
+                worktree: None,
+                settings: WorkspaceSettings::default(),
+            };
+            let workspaces = Mutex::new(HashMap::from([("source".into(), entry)]));
+            let sessions = Mutex::new(HashMap::new());
+            let settings = Mutex::new(AppSettings::default());
+            let storage = root.join("workspaces.json");
+            let error = add_clone_core(
+                "source".into(),
+                "copy".into(),
+                root.to_string_lossy().into(),
+                &workspaces,
+                &sessions,
+                &settings,
+                &storage,
+                |_, _, _, _| async { Err("fixture spawn failure".into()) },
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("retained"));
+            assert!(root.join("copy/.git").is_dir());
+            let error = add_workspace_from_git_url_core(
+                source.to_string_lossy().into(),
+                root.to_string_lossy().into(),
+                Some("url-copy".into()),
+                &workspaces,
+                &sessions,
+                &settings,
+                &storage,
+                |_, _, _, _| async { Err("fixture spawn failure".into()) },
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("retained"));
+            assert!(root.join("url-copy/.git").is_dir());
+            assert_eq!(workspaces.lock().await.len(), 1);
+            assert!(sessions.lock().await.is_empty());
+            assert!(!storage.exists());
+        });
+    }
 
     #[test]
     fn derives_repo_name_from_https_url() {

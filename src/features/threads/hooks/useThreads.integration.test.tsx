@@ -394,6 +394,27 @@ describe("useThreads UX integration", () => {
     expect(sendCall?.[2]).toBe("hello target");
   });
 
+  it("skips runtime changes for selection, new threads, and sends while another workspace is busy", async () => {
+    const ensureWorkspaceRuntimeCodexArgs = vi.fn(async () => undefined);
+    vi.mocked(resumeThread).mockImplementation(async (_workspaceId, threadId) => ({
+      result: { thread: { id: threadId, preview: "", turns: [] } },
+    }));
+    vi.mocked(startThread).mockResolvedValue({ result: { thread: { id: "new-thread" } } });
+    vi.mocked(sendUserMessageService).mockResolvedValue({ result: { turn: { id: "sent-turn" } } });
+    const { result } = renderHook(() => useThreads({
+      activeWorkspace: workspace, onWorkspaceConnected: vi.fn(), ensureWorkspaceRuntimeCodexArgs,
+    }));
+    act(() => { handlers?.onTurnStarted?.("ws-other", "thread-other", "turn-other"); });
+    expect(result.current.threadStatusById["thread-other"]?.isProcessing).toBe(true);
+    await act(async () => { result.current.setActiveThreadId("selected"); });
+    await waitFor(() => { expect(resumeThread).toHaveBeenCalledWith("ws-1", "selected"); });
+    await act(async () => { await result.current.startThreadForWorkspace("ws-1"); });
+    await act(async () => { await result.current.sendUserMessageToThread(workspace, "target", "hello"); });
+    expect(startThread).toHaveBeenCalled();
+    expect(sendUserMessageService).toHaveBeenCalled();
+    expect(ensureWorkspaceRuntimeCodexArgs).not.toHaveBeenCalled();
+  });
+
   it("still starts thread when runtime codex args sync fails", async () => {
     const ensureWorkspaceRuntimeCodexArgs = vi.fn(async () => {
       throw new Error("runtime sync failed");

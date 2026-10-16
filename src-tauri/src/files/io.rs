@@ -114,14 +114,25 @@ pub(crate) fn write_text_file_within(
         return Err(format!("Invalid {file_context} path"));
     }
 
-    let target_path = if candidate.exists() {
-        let candidate_is_symlink = std::fs::symlink_metadata(&candidate)
-            .map_err(|err| format!("Failed to resolve {file_context}: {err}"))?
-            .file_type()
-            .is_symlink();
-        let canonical_path = candidate
-            .canonicalize()
-            .map_err(|err| format!("Failed to resolve {file_context}: {err}"))?;
+    // Inspect the directory entry itself: exists() follows dangling symlinks.
+    let metadata = match std::fs::symlink_metadata(&candidate) {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("Failed to resolve {file_context}: {error}")),
+    };
+    let target_path = if let Some(metadata) = metadata {
+        let candidate_is_symlink = metadata.file_type().is_symlink();
+        let canonical_path = match candidate.canonicalize() {
+            Ok(path) => path,
+            Err(error)
+                if allow_external_symlink_target
+                    && candidate_is_symlink
+                    && error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                candidate.clone()
+            }
+            Err(error) => return Err(format!("Failed to resolve {file_context}: {error}")),
+        };
         if !canonical_path.starts_with(&canonical_root)
             && !(allow_external_symlink_target && candidate_is_symlink)
         {
@@ -144,6 +155,46 @@ mod tests {
 
     fn temp_dir() -> PathBuf {
         std::env::temp_dir().join(format!("codex-monitor-file-io-{}", Uuid::new_v4()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_rejects_dangling_symlink_escape() {
+        let root = temp_dir();
+        let outside = temp_dir();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        for filename in ["AGENTS.md", "config.toml"] {
+            let target = outside.join(filename);
+            std::os::unix::fs::symlink(&target, root.join(filename)).unwrap();
+            assert!(write_text_file_within(
+                &root, filename, "blocked", false, "root", filename, false
+            )
+            .is_err());
+            assert!(!target.exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_allows_dangling_global_agents_symlink_when_enabled() {
+        let root = temp_dir();
+        let outside = temp_dir();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let target = outside.join("AGENTS.md");
+        std::os::unix::fs::symlink(&target, root.join("AGENTS.md")).unwrap();
+        write_text_file_within(
+            &root,
+            "AGENTS.md",
+            "allowed",
+            false,
+            "CODEX_HOME",
+            "AGENTS.md",
+            true,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(target).unwrap(), "allowed");
     }
 
     #[test]

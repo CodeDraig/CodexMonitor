@@ -82,9 +82,16 @@ where
         });
     }
 
+    // Keep new requests from entering the old process between the idle check and
+    // replacement. References obtained before replacement must fail after retirement.
+    let mut activity = current_session.activity.lock().await;
+    if activity.is_busy() {
+        return Err("Cannot change Codex runtime arguments while the shared session has active turns or pending requests".to_string());
+    }
     let codex_home = resolve_workspace_codex_home(&entry, parent_entry.as_ref());
     let new_session =
         spawn_session(entry.clone(), default_bin, target_args.clone(), codex_home).await?;
+    activity.retired = true;
     let workspace_ids = {
         let mut sessions = sessions.lock().await;
         let keys: Vec<String> = sessions.keys().cloned().collect();
@@ -171,6 +178,7 @@ mod tests {
             codex_args,
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
+            activity: Mutex::new(Default::default()),
             pending: Mutex::new(HashMap::new()),
             request_context: Mutex::new(HashMap::new()),
             thread_workspace: Mutex::new(HashMap::new()),
@@ -181,6 +189,58 @@ mod tests {
             workspace_ids: Mutex::new(HashSet::from(["test-owner".to_string()])),
             workspace_roots: Mutex::new(HashMap::new()),
         }
+    }
+
+    #[test]
+    fn runtime_change_rejects_shared_activity_without_spawning_or_killing() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            for pending in [false, true] {
+                let entry = make_workspace_entry("ws-1");
+                let other = make_workspace_entry("ws-2");
+                let workspaces = Mutex::new(HashMap::from([
+                    (entry.id.clone(), entry.clone()),
+                    (other.id.clone(), other.clone()),
+                ]));
+                let session = Arc::new(make_session(entry.clone(), Some("--old".into())));
+                if pending {
+                    session
+                        .activity
+                        .lock()
+                        .await
+                        .begin_request(1, "turn/start", Some("other-thread".into()))
+                        .unwrap();
+                } else {
+                    session.activity.lock().await.observe(
+                        &serde_json::json!({"method":"turn/started"}),
+                        Some("other-thread".into()),
+                    );
+                }
+                let sessions = Mutex::new(HashMap::from([
+                    (entry.id.clone(), session.clone()),
+                    (other.id.clone(), session.clone()),
+                ]));
+                let settings = Mutex::new(AppSettings::default());
+                let result = set_workspace_runtime_codex_args_core(
+                    entry.id.clone(),
+                    Some("--new".into()),
+                    &workspaces,
+                    &sessions,
+                    &settings,
+                    |_, _, _, _| async { panic!("must not spawn while busy") },
+                )
+                .await;
+                assert!(result
+                    .unwrap_err()
+                    .contains("active turns or pending requests"));
+                assert!(Arc::ptr_eq(
+                    sessions.lock().await.get(&other.id).unwrap(),
+                    &session
+                ));
+                assert!(session.child.lock().await.try_wait().unwrap().is_none());
+                assert!(!session.activity.lock().await.retired);
+                kill_child_process_tree(&mut *session.child.lock().await).await;
+            }
+        });
     }
 
     #[test]
@@ -228,7 +288,7 @@ mod tests {
             let entry = make_workspace_entry("ws-1");
             let workspaces = Mutex::new(HashMap::from([(entry.id.clone(), entry.clone())]));
             let current_session = Arc::new(make_session(entry.clone(), Some("--same".to_string())));
-            let sessions = Mutex::new(HashMap::from([(entry.id.clone(), current_session)]));
+            let sessions = Mutex::new(HashMap::from([(entry.id.clone(), current_session.clone())]));
             let app_settings = Mutex::new(AppSettings::default());
 
             let spawn_calls = Arc::new(AtomicUsize::new(0));
@@ -268,7 +328,7 @@ mod tests {
             let entry = make_workspace_entry("ws-1");
             let workspaces = Mutex::new(HashMap::from([(entry.id.clone(), entry.clone())]));
             let current_session = Arc::new(make_session(entry.clone(), Some("--old".to_string())));
-            let sessions = Mutex::new(HashMap::from([(entry.id.clone(), current_session)]));
+            let sessions = Mutex::new(HashMap::from([(entry.id.clone(), current_session.clone())]));
             let app_settings = Mutex::new(AppSettings::default());
 
             let spawn_calls = Arc::new(AtomicUsize::new(0));
@@ -308,6 +368,13 @@ mod tests {
                 .codex_args
                 .clone();
             assert_eq!(next, Some("--new".to_string()));
+            assert!(current_session
+                .send_request("turn/start", serde_json::json!({"threadId":"stale"}))
+                .await
+                .unwrap_err()
+                .contains("replaced"));
+            let new_session = sessions.lock().await.get(&entry.id).cloned().unwrap();
+            kill_child_process_tree(&mut *new_session.child.lock().await).await;
         });
     }
 }

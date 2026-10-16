@@ -22,12 +22,15 @@ export function useThreadApprovalEvents({
       const commandInfo = getApprovalCommandInfo(approval.params ?? {});
       const allowlist =
         approvalAllowlistRef.current[approval.workspace_id] ?? [];
-      if (commandInfo && matchesCommandPrefix(commandInfo.tokens, allowlist)) {
-        void respondToServerRequest(
+      if (approval.method === "item/commandExecution/requestApproval"
+        && !approval.params.networkApprovalContext && !approval.params.additionalPermissions
+        && (!Array.isArray(approval.params.availableDecisions) || approval.params.availableDecisions.includes("accept"))
+        && commandInfo && matchesCommandPrefix(commandInfo.tokens, allowlist)) {
+        void Promise.resolve(respondToServerRequest(
           approval.workspace_id,
           approval.request_id,
           "accept",
-        );
+        )).catch(() => dispatch({ type: "addApproval", approval }));
         return;
       }
       dispatch({ type: "addApproval", approval });

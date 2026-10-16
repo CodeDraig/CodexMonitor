@@ -201,19 +201,19 @@ export function useQueuedSend({
       }
       if (command === "apps") {
         await startApps(trimmed);
-        return;
+        return "complete";
       }
       if (command === "mcp") {
         await startMcp(trimmed);
-        return;
+        return "complete";
       }
       if (command === "fast") {
         await startFast(trimmed);
-        return;
+        return "complete";
       }
       if (command === "status") {
         await startStatus(trimmed);
-        return;
+        return "complete";
       }
       if (command === "new" && activeWorkspace) {
         const threadId = await startThreadForWorkspace(activeWorkspace.id);
@@ -403,7 +403,11 @@ export function useQueuedSend({
         const trimmed = nextItem.text.trim();
         const command = parseSlashCommand(trimmed, appsEnabled);
         if (command) {
-          await runSlashCommand(command, trimmed);
+          const completion = await runSlashCommand(command, trimmed);
+          if (completion === "complete") {
+            setInFlightByThread((prev) => ({ ...prev, [threadId]: null }));
+            setHasStartedByThread((prev) => ({ ...prev, [threadId]: false }));
+          }
         } else {
           const queuedMentions = nextItem.appMentions ?? [];
           if (queuedMentions.length > 0) {

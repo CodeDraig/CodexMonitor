@@ -11,7 +11,7 @@ CodexMonitor is a Tauri app for orchestrating multiple Codex agents across local
 ### Workspaces & Threads
 
 - Add and persist workspaces, group/sort them, and jump into recent agent activity from the home dashboard.
-- Spawn one `codex app-server` per workspace, resume threads, and track unread/running state.
+- Share one `codex app-server` process across connected workspaces in each backend, resume threads, and track unread/running state.
 - Worktree and clone agents for isolated work; worktrees live under the app data directory (legacy `.codex-worktrees` supported).
 - Thread management: pin/rename/archive/copy, per-thread drafts, and stop/interrupt in-flight turns.
 - Optional remote backend (daemon) mode for running Codex on another machine.
@@ -61,6 +61,18 @@ If you hit native build errors, run:
 ```bash
 npm run doctor
 ```
+
+## Codex compatibility
+
+The app-server integration targets Codex CLI 0.162.1 with the experimental API enabled.
+See [the protocol reference](docs/app-server-events.md) for supported requests,
+notifications, input modes, history behavior, and compatibility checks.
+
+Conversation history is loaded through paginated requests. Command/file approvals,
+selected permission grants, and standard MCP form/URL input are supported. Steering
+and collaboration modes are core capabilities; removed Codex feature flags do not
+disable them. App/plugin feature changes apply to connected servers immediately;
+other feature changes require restarting CodexMonitor.
 
 ## Getting Started
 
@@ -289,19 +301,22 @@ src-tauri/
 
 ## Notes
 
-- Workspaces persist to `workspaces.json` under the app data directory.
+- Workspaces persist to `workspaces.json` under the app data directory. The desktop-managed daemon shares that directory; a directly launched daemon uses its `--data-dir` or the separate `codex-monitor-daemon` data directory.
 - App settings persist to `settings.json` under the app data directory (theme, backend mode/provider, remote endpoints/tokens, Codex path, default access mode, UI scale, follow-up message behavior).
 - Feature settings are supported in the UI and synced to `$CODEX_HOME/config.toml` (or `~/.codex/config.toml`) on load/save. Stable: Collaboration modes (`features.collaboration_modes`), personality (`personality`), and Background terminal (`features.unified_exec`). Experimental: Apps (`features.apps`). Steering capability still follows Codex `features.steer`, but follow-up default behavior is controlled in Settings → Composer.
 - On launch and on window focus, the app reconnects and refreshes thread lists for each workspace.
 - Threads are restored by filtering `thread/list` results using the workspace `cwd`.
-- Selecting a thread always calls `thread/resume` to refresh messages from disk.
+- Selecting a thread resumes it from disk when no local snapshot is available.
 - CLI sessions appear if their `cwd` matches the workspace path; they are not live-streamed unless resumed.
 - The app uses `codex app-server` over stdio; see `src-tauri/src/lib.rs` and `src-tauri/src/codex/`.
 - The remote daemon entrypoint is `src-tauri/src/bin/codex_monitor_daemon.rs`; RPC routing lives in `src-tauri/src/bin/codex_monitor_daemon/rpc.rs` and domain handlers in `src-tauri/src/bin/codex_monitor_daemon/rpc/`.
 - Shared domain logic lives in `src-tauri/src/shared/` (notably `src-tauri/src/shared/git_ui_core/` and `src-tauri/src/shared/workspaces_core/`).
-- Codex home resolves from workspace settings (if set), then legacy `.codexmonitor/`, then `$CODEX_HOME`/`~/.codex`.
+- Codex home resolves globally from `$CODEX_HOME`, falling back to `~/.codex`. Workspace-specific homes are not used by the shared process.
 - Worktree agents live under the app data directory (`worktrees/<workspace-id>`); legacy `.codex-worktrees/` paths remain supported, and the app no longer edits repo `.gitignore` files.
-- UI state (panel sizes, reduced transparency toggle, recent thread activity) is stored in `localStorage`.
+- UI state (panel sizes, reduced transparency toggle, recent thread activity) is stored in `localStorage`. Queued follow-up messages are held in memory and do not survive an app restart.
+- Runtime argument changes replace the shared Codex process only when no turns or requests are active. A busy backend rejects the change; the UI skips automatic argument changes while any workspace is processing.
+- Failed clone/add operations retain any destination left on disk and include its path in the error. Inspect or add that checkout before retrying. Exhausted clone-name candidates return an error without selecting an occupied directory.
+- Settings saves report Codex config failures before changing app settings. If config succeeds but saving `settings.json` fails, the error reports that partial save.
 - Custom prompts load from `$CODEX_HOME/prompts` (or `~/.codex/prompts`) with optional frontmatter description/argument hints.
 
 ## Tauri IPC Surface

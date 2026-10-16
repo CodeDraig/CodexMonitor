@@ -99,6 +99,23 @@ where
     Ok(())
 }
 
+pub(crate) async fn prune_workspace_sessions_core(
+    sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
+    workspace_ids: &std::collections::HashSet<String>,
+) {
+    let _spawn_guard = workspace_session_spawn_lock().lock().await;
+    let stale_ids: Vec<String> = sessions
+        .lock()
+        .await
+        .keys()
+        .filter(|id| !workspace_ids.contains(*id))
+        .cloned()
+        .collect();
+    for id in stale_ids {
+        kill_session_by_id(sessions, &id).await;
+    }
+}
+
 pub(super) async fn kill_session_by_id(
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
     id: &str,
@@ -171,6 +188,7 @@ mod tests {
             codex_args: None,
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
+            activity: Mutex::new(Default::default()),
             pending: Mutex::new(HashMap::new()),
             request_context: Mutex::new(HashMap::new()),
             thread_workspace: Mutex::new(HashMap::new()),
