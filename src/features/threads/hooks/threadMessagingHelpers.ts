@@ -31,7 +31,6 @@ type ResolveSendMessageOptionsArgs = {
     effort?: string | null;
     serviceTier?: ServiceTier | null | undefined;
     collaborationMode?: Record<string, unknown> | null;
-    steerEnabled: boolean;
     isProcessing: boolean;
     activeTurnId: string | null;
   };
@@ -133,7 +132,7 @@ export function resolveSendMessageOptions({
   const appMentions = options?.appMentions ?? [];
   const sendIntent = options?.sendIntent ?? "default";
   const canSteerCurrentTurn =
-    defaults.isProcessing && defaults.steerEnabled && Boolean(defaults.activeTurnId);
+    defaults.isProcessing && Boolean(defaults.activeTurnId);
   const shouldSteer =
     sendIntent === "steer"
       ? canSteerCurrentTurn

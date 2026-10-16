@@ -851,7 +851,6 @@ describe("useThreads UX integration", () => {
         activeTurnId: threadId ? threads.activeTurnIdByThread[threadId] ?? null : null,
         isProcessing: status?.isProcessing ?? false,
         isReviewing: status?.isReviewing ?? false,
-        steerEnabled: false,
         followUpMessageBehavior: "queue",
         appsEnabled: true,
         activeWorkspace: workspace,
@@ -974,7 +973,6 @@ describe("useThreads UX integration", () => {
       useThreads({
         activeWorkspace: workspace,
         onWorkspaceConnected: vi.fn(),
-        steerEnabled: true,
       }),
     );
 

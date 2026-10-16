@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::backend::app_server::WorkspaceSession;
+use crate::backend::app_server::session::WorkspaceSession;
 use crate::types::{WorkspaceEntry, WorkspaceInfo};
 use crate::utils::normalize_windows_namespace_path;
 

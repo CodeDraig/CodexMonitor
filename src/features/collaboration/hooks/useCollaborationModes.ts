@@ -1,3 +1,4 @@
+import { parseCollaborationModes } from "@/features/collaboration/utils/collaborationModes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CollaborationModeOption,
@@ -8,7 +9,6 @@ import { getCollaborationModes } from "../../../services/tauri";
 
 type UseCollaborationModesOptions = {
   activeWorkspace: WorkspaceInfo | null;
-  enabled: boolean;
   preferredModeId?: string | null;
   selectionKey?: string | null;
   onDebug?: (entry: DebugEntry) => void;
@@ -33,7 +33,6 @@ function pickWorkspaceDefaultModeId(modes: CollaborationModeOption[]): string | 
 
 export function useCollaborationModes({
   activeWorkspace,
-  enabled,
   preferredModeId = null,
   selectionKey = null,
   onDebug,
@@ -45,39 +44,9 @@ export function useCollaborationModes({
   const inFlight = useRef(false);
   const selectedModeIdRef = useRef<string | null>(null);
   const lastSelectionKey = useRef<string | null>(null);
-  const lastEnabled = useRef(enabled);
 
   const workspaceId = activeWorkspace?.id ?? null;
   const isConnected = Boolean(activeWorkspace?.connected);
-
-  const extractModeList = useCallback((response: any): any[] => {
-    const candidates = [
-      response?.result?.data,
-      response?.result?.modes,
-      response?.result,
-      response?.data,
-      response?.modes,
-      response,
-    ];
-    for (const candidate of candidates) {
-      if (Array.isArray(candidate)) {
-        return candidate;
-      }
-      if (candidate && typeof candidate === "object") {
-        const nested = (candidate as any).data ?? (candidate as any).modes;
-        if (Array.isArray(nested)) {
-          return nested;
-        }
-        if (nested && typeof nested === "object") {
-          const deep = (nested as any).data ?? (nested as any).modes;
-          if (Array.isArray(deep)) {
-            return deep;
-          }
-        }
-      }
-    }
-    return [];
-  }, []);
 
   const selectedMode = useMemo(
     () => modes.find((mode) => mode.id === selectedModeId) ?? null,
@@ -85,7 +54,7 @@ export function useCollaborationModes({
   );
 
   const refreshModes = useCallback(async () => {
-    if (!workspaceId || !isConnected || !enabled) {
+    if (!workspaceId || !isConnected) {
       return;
     }
     if (inFlight.current) {
@@ -108,55 +77,7 @@ export function useCollaborationModes({
         label: "collaborationMode/list response",
         payload: response,
       });
-      const rawData = extractModeList(response);
-      const data: CollaborationModeOption[] = rawData
-        .map((item: any) => {
-          if (!item || typeof item !== "object") {
-            return null;
-          }
-          const modeId = String(item.mode ?? item.name ?? "").trim();
-          if (!modeId) {
-            return null;
-          }
-
-          const settings =
-            item.settings && typeof item.settings === "object"
-              ? item.settings
-              : {
-                  model: item.model ?? null,
-                  reasoning_effort:
-                    item.reasoning_effort ?? item.reasoningEffort ?? null,
-                  developer_instructions:
-                    item.developer_instructions ??
-                    item.developerInstructions ??
-                    null,
-                };
-
-          const model = String(settings.model ?? "");
-          const reasoningEffort = settings.reasoning_effort ?? null;
-          const developerInstructions = settings.developer_instructions ?? null;
-
-          const labelSource =
-            typeof item.label === "string" && item.label.trim()
-              ? item.label
-              : typeof item.name === "string" && item.name.trim()
-                ? item.name
-                : modeId;
-
-          const option: CollaborationModeOption = {
-            id: modeId,
-            label: labelSource,
-            mode: modeId,
-            model,
-            reasoningEffort: reasoningEffort ? String(reasoningEffort) : null,
-            developerInstructions: developerInstructions
-              ? String(developerInstructions)
-              : null,
-            value: item as Record<string, unknown>,
-          };
-          return option;
-        })
-        .filter((mode): mode is CollaborationModeOption => mode !== null);
+      const data = parseCollaborationModes(response);
       setModes(data);
       lastFetchedWorkspaceId.current = workspaceId;
       const workspaceDefaultModeId = pickWorkspaceDefaultModeId(data);
@@ -181,20 +102,14 @@ export function useCollaborationModes({
     } finally {
       inFlight.current = false;
     }
-  }, [enabled, extractModeList, isConnected, onDebug, workspaceId]);
+  }, [isConnected, onDebug, workspaceId]);
 
   useEffect(() => {
     selectedModeIdRef.current = selectedModeId;
   }, [selectedModeId]);
 
   useEffect(() => {
-    const wasEnabled = lastEnabled.current;
-    lastEnabled.current = enabled;
-    if (!enabled) {
-      return;
-    }
-    const enabledJustReenabled = !wasEnabled;
-    if (!enabledJustReenabled && selectionKey === lastSelectionKey.current) {
+    if (selectionKey === lastSelectionKey.current) {
       return;
     }
     lastSelectionKey.current = selectionKey;
@@ -212,7 +127,7 @@ export function useCollaborationModes({
       }
       return pickWorkspaceDefaultModeId(modes);
     });
-  }, [enabled, modes, preferredModeId, selectionKey]);
+  }, [modes, preferredModeId, selectionKey]);
 
   useEffect(() => {
     if (previousWorkspaceId.current !== workspaceId) {
@@ -223,12 +138,6 @@ export function useCollaborationModes({
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!enabled) {
-      setModes([]);
-      setSelectedModeId(null);
-      lastFetchedWorkspaceId.current = null;
-      return;
-    }
     if (!workspaceId || !isConnected) {
       setModes([]);
       lastFetchedWorkspaceId.current = null;
@@ -239,7 +148,7 @@ export function useCollaborationModes({
       return;
     }
     refreshModes();
-  }, [enabled, isConnected, modes.length, refreshModes, workspaceId]);
+  }, [isConnected, modes.length, refreshModes, workspaceId]);
 
   return {
     collaborationModes: modes,

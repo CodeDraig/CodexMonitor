@@ -206,7 +206,6 @@ export type RemoteBackendTarget = {
   lastConnectedAtMs?: number | null;
 };
 export type ThemePreference = "system" | "light" | "dark" | "dim";
-export type PersonalityPreference = "friendly" | "pragmatic";
 export type FollowUpMessageBehavior = "queue" | "steer";
 export type ComposerSendIntent = "default" | "queue" | "steer";
 export type SendMessageResult = {
@@ -241,9 +240,6 @@ export type AppSettings = {
   codexBin: string | null;
   codexArgs: string | null;
   backendMode: BackendMode;
-  remoteBackendProvider: RemoteBackendProvider;
-  remoteBackendHost: string;
-  remoteBackendToken: string | null;
   remoteBackends: RemoteBackendTarget[];
   activeRemoteBackendId: string | null;
   keepDaemonRunningAfterAppClose: boolean;
@@ -287,14 +283,11 @@ export type AppSettings = {
   gitDiffIgnoreWhitespaceChanges: boolean;
   commitMessagePrompt: string;
   commitMessageModelId: string | null;
-  collaborationModesEnabled: boolean;
-  steerEnabled: boolean;
   followUpMessageBehavior: FollowUpMessageBehavior;
   composerFollowUpHintEnabled: boolean;
   pauseQueuedMessagesWhenResponseRequired: boolean;
   unifiedExecEnabled: boolean;
   experimentalAppsEnabled: boolean;
-  personality: PersonalityPreference;
   dictationEnabled: boolean;
   dictationModelId: string;
   dictationPreferredLanguage: string | null;

@@ -7,7 +7,6 @@ export const SUPPORTED_APP_SERVER_METHODS = [
   "account/updated",
   "codex/backgroundThread",
   "codex/connected",
-  "codex/event/skills_update_available",
   "skills/changed",
   "error",
   "configWarning",
@@ -49,7 +48,6 @@ export type SupportedAppServerMethod = (typeof SUPPORTED_APP_SERVER_METHODS)[num
 
 export const METHODS_HANDLED_OUTSIDE_USE_APP_SERVER_EVENTS = [
   "app/list/updated",
-  "codex/event/skills_update_available",
   "skills/changed",
 ] as const satisfies readonly SupportedAppServerMethod[];
 
@@ -117,7 +115,7 @@ export function isApprovalRequestMethod(method: string): boolean {
 
 export function isSkillsUpdateAvailableEvent(event: AppServerEvent): boolean {
   const method = getAppServerRawMethod(event);
-  return method === "skills/changed" || method === "codex/event/skills_update_available";
+  return method === "skills/changed";
 }
 
 export function isAppListUpdatedEvent(event: AppServerEvent): boolean {

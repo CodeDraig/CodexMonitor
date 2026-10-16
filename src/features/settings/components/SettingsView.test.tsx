@@ -1,3 +1,4 @@
+import { getActiveRemoteBackend } from "../utils/remoteBackends";
 // @vitest-environment jsdom
 import {
   act,
@@ -72,9 +73,6 @@ const baseSettings: AppSettings = {
   codexBin: null,
   codexArgs: null,
   backendMode: "local",
-  remoteBackendProvider: "tcp",
-  remoteBackendHost: "127.0.0.1:4732",
-  remoteBackendToken: null,
   remoteBackends: [
     {
       id: "remote-default",
@@ -128,14 +126,11 @@ const baseSettings: AppSettings = {
   gitDiffIgnoreWhitespaceChanges: false,
   commitMessagePrompt: DEFAULT_COMMIT_MESSAGE_PROMPT,
   commitMessageModelId: null,
-  collaborationModesEnabled: true,
-  steerEnabled: true,
   followUpMessageBehavior: "queue",
   composerFollowUpHintEnabled: true,
   pauseQueuedMessagesWhenResponseRequired: true,
   unifiedExecEnabled: true,
   experimentalAppsEnabled: false,
-  personality: "friendly",
   dictationEnabled: false,
   dictationModelId: "base",
   dictationPreferredLanguage: null,
@@ -1147,7 +1142,6 @@ describe("SettingsView Codex section", () => {
         appSettings={{
           ...baseSettings,
           backendMode: "local",
-          remoteBackendProvider: "tcp",
         }}
         openAppIconById={{}}
         onUpdateAppSettings={vi.fn().mockResolvedValue(undefined)}
@@ -1222,7 +1216,6 @@ describe("SettingsView Codex section", () => {
           appSettings={{
             ...baseSettings,
             backendMode: "local",
-            remoteBackendProvider: "tcp",
           }}
           openAppIconById={{}}
           onUpdateAppSettings={vi.fn().mockResolvedValue(undefined)}
@@ -1324,9 +1317,6 @@ describe("SettingsView Codex section", () => {
           onToggleTransparency={vi.fn()}
           appSettings={{
             ...baseSettings,
-            remoteBackendProvider: "tcp",
-            remoteBackendHost: "127.0.0.1:4732",
-            remoteBackendToken: "token-a",
             remoteBackends: [
               {
                 id: "remote-a",
@@ -1373,9 +1363,6 @@ describe("SettingsView Codex section", () => {
         expect(onUpdateAppSettings).toHaveBeenCalledWith(
           expect.objectContaining({
             activeRemoteBackendId: "remote-b",
-            remoteBackendProvider: "tcp",
-            remoteBackendHost: "office-mac.tailnet.ts.net:4732",
-            remoteBackendToken: "token-b",
           }),
         );
       });
@@ -1419,8 +1406,8 @@ describe("SettingsView Codex section", () => {
       const connectedSettings = onUpdateAppSettings.mock.calls[1]?.[0] as AppSettings;
       expect(trialSettings.remoteBackends).toHaveLength(3);
       expect(trialSettings.activeRemoteBackendId).toBeTruthy();
-      expect(trialSettings.remoteBackendHost).toBe("travel-mac.tailnet.ts.net:4732");
-      expect(trialSettings.remoteBackendToken).toBe("token-travel");
+      expect(getActiveRemoteBackend(trialSettings).host).toBe("travel-mac.tailnet.ts.net:4732");
+      expect(getActiveRemoteBackend(trialSettings).token).toBe("token-travel");
       expect(connectedSettings.remoteBackends).toHaveLength(3);
       const connectedEntry = connectedSettings.remoteBackends.find(
         (entry) => entry.id === connectedSettings.activeRemoteBackendId,
@@ -1699,7 +1686,7 @@ describe("SettingsView Features", () => {
 
   it("hides steer mode dynamic feature row", async () => {
     renderFeaturesSection({
-      appSettings: { steerEnabled: true },
+      appSettings: {},
     });
 
     await screen.findByText("Background terminal");
@@ -1708,7 +1695,7 @@ describe("SettingsView Features", () => {
 
   it("hides steer mode when returned as an experimental feature", async () => {
     renderFeaturesSection({
-      appSettings: { steerEnabled: true },
+      appSettings: {},
       experimentalFeaturesResponse: {
         data: [
           {
@@ -1812,7 +1799,6 @@ describe("SettingsView Composer", () => {
     renderComposerSection({
       onUpdateAppSettings,
       appSettings: {
-        steerEnabled: true,
         followUpMessageBehavior: "queue",
       },
     });
@@ -1826,29 +1812,7 @@ describe("SettingsView Composer", () => {
     });
   });
 
-  it("disables steer follow-up behavior when steer is unavailable", async () => {
-    const onUpdateAppSettings = vi.fn().mockResolvedValue(undefined);
-    renderComposerSection({
-      onUpdateAppSettings,
-      appSettings: {
-        steerEnabled: false,
-        followUpMessageBehavior: "queue",
-      },
-    });
 
-    const steerOption = screen.getByRole("radio", { name: "Steer" });
-    expect(steerOption.hasAttribute("disabled")).toBe(true);
-    expect(
-      screen.getByText(
-        "Steer is unavailable in the current Codex config. Follow-ups will queue.",
-      ),
-    ).not.toBeNull();
-
-    fireEvent.click(steerOption);
-    await waitFor(() => {
-      expect(onUpdateAppSettings).not.toHaveBeenCalled();
-    });
-  });
 });
 
 describe("SettingsView mobile layout", () => {

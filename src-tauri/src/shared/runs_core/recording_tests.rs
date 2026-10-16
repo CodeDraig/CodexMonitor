@@ -380,7 +380,7 @@ fn uncertain_initial_submission_cannot_capture_a_later_followup_as_primary() {
 }
 
 #[test]
-fn reconciliation_never_freezes_active_turn_on_history_failure_and_supports_full_read() {
+fn reconciliation_never_freezes_active_turn_on_history_failure_and_recovers() {
     runtime().block_on(async {
         use std::collections::HashMap;
         use tokio::sync::Mutex;
@@ -403,7 +403,7 @@ fn reconciliation_never_freezes_active_turn_on_history_failure_and_supports_full
             assert!(!result["errors"].as_array().unwrap().is_empty());
             assert!(store.instance(&tracking.context.instance_id).unwrap().captures.is_empty());
         }
-        std::fs::write(dir.join("unsupported-history"), "legacy server").unwrap();
+        std::fs::remove_file(dir.join("fail-history")).unwrap();
         std::fs::write(dir.join("running"), "still running").unwrap();
         let result = crate::shared::runs_rpc::dispatch("reconcile_run",
             json!({"runId": tracking.context.run_id}), tracking.path.clone(), &workspaces, &sessions).await.unwrap();
@@ -416,7 +416,7 @@ fn reconciliation_never_freezes_active_turn_on_history_failure_and_supports_full
         assert_eq!(instance.captures.len(), 1);
         let capture = store.capture(&instance.captures[0].id).unwrap();
         assert!(capture.complete);
-        assert_eq!(capture.items[0]["text"], "legacy full result");
+        assert_eq!(capture.items[0]["text"], "first result");
         assert_eq!(capture.kind, CaptureKind::InitialTurn);
         assert!(!dir.join("turn-count").exists());
         session.child.lock().await.kill().await.unwrap();

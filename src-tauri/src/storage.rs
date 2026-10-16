@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::types::{AppSettings, WorkspaceEntry, WorkspaceSettings};
-use serde_json::Value;
 
 fn normalize_windows_namespace_path(path: &str) -> String {
     if path.is_empty() {
@@ -156,18 +155,9 @@ pub(crate) fn read_settings(path: &PathBuf) -> Result<AppSettings, String> {
         return Ok(AppSettings::default());
     }
     let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut value: Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-    migrate_follow_up_message_behavior(&mut value);
-    match serde_json::from_value(value.clone()) {
-        Ok(settings) => Ok(finalize_loaded_settings(path, settings)),
-        Err(_) => {
-            sanitize_remote_settings_for_tcp_only(&mut value);
-            migrate_follow_up_message_behavior(&mut value);
-            serde_json::from_value(value)
-                .map(|settings| finalize_loaded_settings(path, settings))
-                .map_err(|e| e.to_string())
-        }
-    }
+    serde_json::from_str(&data)
+        .map(|settings| finalize_loaded_settings(path, settings))
+        .map_err(|e| e.to_string())
 }
 
 pub(crate) fn write_settings(path: &PathBuf, settings: &AppSettings) -> Result<(), String> {
@@ -185,49 +175,6 @@ fn finalize_loaded_settings(path: &PathBuf, settings: AppSettings) -> AppSetting
         try_rewrite_settings_with_normalized_paths(path, &settings);
     }
     settings
-}
-
-fn sanitize_remote_settings_for_tcp_only(value: &mut Value) {
-    let Value::Object(root) = value else {
-        return;
-    };
-    root.insert(
-        "remoteBackendProvider".to_string(),
-        Value::String("tcp".to_string()),
-    );
-    if let Some(Value::Array(remote_backends)) = root.get_mut("remoteBackends") {
-        for entry in remote_backends {
-            let Value::Object(entry_obj) = entry else {
-                continue;
-            };
-            entry_obj.insert("provider".to_string(), Value::String("tcp".to_string()));
-            entry_obj.retain(|key, _| {
-                matches!(
-                    key.as_str(),
-                    "id" | "name" | "provider" | "host" | "token" | "lastConnectedAtMs"
-                )
-            });
-        }
-    }
-    root.retain(|key, _| !key.to_ascii_lowercase().starts_with("orb"));
-}
-
-fn migrate_follow_up_message_behavior(value: &mut Value) {
-    let Value::Object(root) = value else {
-        return;
-    };
-    if root.contains_key("followUpMessageBehavior") {
-        return;
-    }
-    let steer_enabled = root
-        .get("steerEnabled")
-        .or_else(|| root.get("experimentalSteerEnabled"))
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    root.insert(
-        "followUpMessageBehavior".to_string(),
-        Value::String(if steer_enabled { "steer" } else { "queue" }.to_string()),
-    );
 }
 
 #[cfg(test)]
@@ -324,83 +271,21 @@ mod tests {
     }
 
     #[test]
-    fn read_settings_sanitizes_non_tcp_remote_provider() {
-        let temp_dir = std::env::temp_dir().join(format!("codex-monitor-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-        let path = temp_dir.join("settings.json");
-
-        std::fs::write(
-            &path,
-            r#"{
-  "remoteBackendProvider": "legacy-provider",
-  "remoteBackendHost": "example:4732",
-  "remoteBackendToken": "token-1",
-  "remoteBackends": [
-    {
-      "id": "remote-a",
-      "name": "Remote A",
-      "provider": "legacy-provider",
-      "host": "example:4732",
-      "token": "token-1",
-      "legacyWsUrl": "wss://example/ws"
-    }
-  ],
-  "theme": "dark"
-}"#,
-        )
-        .expect("write settings");
-
-        let settings = read_settings(&path).expect("read settings");
-        assert!(matches!(
-            settings.remote_backend_provider,
-            crate::types::RemoteBackendProvider::Tcp
-        ));
-        assert_eq!(settings.remote_backends.len(), 1);
-        assert!(matches!(
-            settings.remote_backends[0].provider,
-            crate::types::RemoteBackendProvider::Tcp
-        ));
-        assert_eq!(settings.theme, "dark");
+    fn read_settings_rejects_unsupported_remote_provider() {
+        let dir = std::env::temp_dir().join(format!("codex-monitor-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"remoteBackends":[{"id":"a","name":"A","provider":"unsupported"}]}"#).unwrap();
+        assert!(read_settings(&path).unwrap_err().contains("unknown variant"));
     }
 
     #[test]
-    fn read_settings_migrates_follow_up_behavior_from_legacy_steer_enabled_true() {
-        let temp_dir = std::env::temp_dir().join(format!("codex-monitor-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-        let path = temp_dir.join("settings.json");
-
-        std::fs::write(
-            &path,
-            r#"{
-  "steerEnabled": true,
-  "theme": "dark"
-}"#,
-        )
-        .expect("write settings");
-
-        let settings = read_settings(&path).expect("read settings");
-        assert!(settings.steer_enabled);
-        assert_eq!(settings.follow_up_message_behavior, "steer");
-    }
-
-    #[test]
-    fn read_settings_migrates_follow_up_behavior_from_legacy_steer_enabled_false() {
-        let temp_dir = std::env::temp_dir().join(format!("codex-monitor-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
-        let path = temp_dir.join("settings.json");
-
-        std::fs::write(
-            &path,
-            r#"{
-  "steerEnabled": false,
-  "theme": "dark"
-}"#,
-        )
-        .expect("write settings");
-
-        let settings = read_settings(&path).expect("read settings");
-        assert!(!settings.steer_enabled);
-        assert_eq!(settings.follow_up_message_behavior, "queue");
+    fn read_settings_uses_current_follow_up_default() {
+        let dir = std::env::temp_dir().join(format!("codex-monitor-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(read_settings(&path).unwrap().follow_up_message_behavior, AppSettings::default().follow_up_message_behavior);
     }
 
     #[test]
@@ -459,7 +344,6 @@ mod tests {
         std::fs::write(
             &path,
             r#"{
-  "steerEnabled": true,
   "followUpMessageBehavior": "queue",
   "theme": "dark"
 }"#,

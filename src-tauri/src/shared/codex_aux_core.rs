@@ -7,9 +7,10 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::timeout;
 
-use crate::backend::app_server::{
-    build_codex_command_with_bin, build_codex_path_env, check_codex_installation, WorkspaceSession,
+use crate::backend::app_server::command::{
+    build_codex_command_with_bin, build_codex_path_env, check_codex_installation,
 };
+use crate::backend::app_server::session::WorkspaceSession;
 use crate::shared::process_core::tokio_command;
 use crate::types::{AppSettings, WorkspaceEntry};
 

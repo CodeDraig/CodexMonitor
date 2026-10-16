@@ -14,7 +14,6 @@ type UseQueuedSendOptions = {
   isProcessing: boolean;
   isReviewing: boolean;
   queueFlushPaused?: boolean;
-  steerEnabled: boolean;
   followUpMessageBehavior: FollowUpMessageBehavior;
   appsEnabled: boolean;
   activeWorkspace: WorkspaceInfo | null;
@@ -111,7 +110,6 @@ export function useQueuedSend({
   isProcessing,
   isReviewing,
   queueFlushPaused = false,
-  steerEnabled,
   followUpMessageBehavior,
   appsEnabled,
   activeWorkspace,
@@ -250,7 +248,7 @@ export function useQueuedSend({
       const nextImages = command ? [] : images;
       const nextMentions = command ? [] : appMentions;
       const canSteerCurrentTurn =
-        isProcessing && steerEnabled && Boolean(activeTurnId);
+        isProcessing && Boolean(activeTurnId);
       const effectiveIntent: ComposerSendIntent = !isProcessing
         ? "default"
         : submitIntent === "queue"
@@ -311,7 +309,6 @@ export function useQueuedSend({
       followUpMessageBehavior,
       isProcessing,
       isReviewing,
-      steerEnabled,
       runSlashCommand,
       sendUserMessage,
     ],

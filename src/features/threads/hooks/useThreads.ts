@@ -55,7 +55,6 @@ type UseThreadsOptions = {
   accessMode?: "read-only" | "current" | "full-access";
   onSelectServiceTier?: (tier: ServiceTier | null | undefined) => void;
   reviewDeliveryMode?: "inline" | "detached";
-  steerEnabled?: boolean;
   threadTitleAutogenerationEnabled?: boolean;
   chatHistoryScrollbackItems?: number | null;
   customPrompts?: CustomPromptOption[];
@@ -86,7 +85,6 @@ export function useThreads({
   accessMode,
   onSelectServiceTier,
   reviewDeliveryMode = "inline",
-  steerEnabled = false,
   threadTitleAutogenerationEnabled = false,
   chatHistoryScrollbackItems,
   customPrompts = [],
@@ -746,7 +744,6 @@ export function useThreads({
     collaborationMode,
     onSelectServiceTier,
     reviewDeliveryMode,
-    steerEnabled,
     customPrompts,
     ensureWorkspaceRuntimeCodexArgs,
     shouldPreflightRuntimeCodexArgsForSend,

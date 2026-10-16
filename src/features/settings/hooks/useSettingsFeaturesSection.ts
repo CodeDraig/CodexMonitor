@@ -39,10 +39,10 @@ function normalizeStage(value: unknown): CodexFeatureStage | null {
   const raw = String(value ?? "")
     .trim()
     .toLowerCase();
-  if (raw === "underdevelopment" || raw === "under_development") {
+  if (raw === "underdevelopment") {
     return "under_development";
   }
-  if (raw === "beta" || raw === "experimental") {
+  if (raw === "beta") {
     return "beta";
   }
   if (raw === "stable") {
@@ -70,9 +70,7 @@ function normalizeFeature(item: unknown): CodexFeature | null {
   const displayName =
     typeof record.displayName === "string"
       ? record.displayName
-      : typeof record.display_name === "string"
-        ? record.display_name
-        : null;
+      : null;
   const description =
     typeof record.description === "string" ? record.description : null;
   const announcement =
@@ -81,7 +79,7 @@ function normalizeFeature(item: unknown): CodexFeature | null {
   const defaultEnabled =
     typeof record.defaultEnabled === "boolean"
       ? record.defaultEnabled
-      : Boolean(record.default_enabled);
+      : false;
   return {
     name,
     stage,
@@ -112,9 +110,7 @@ function parseFeaturePage(response: unknown): {
   const nextCursorRaw =
     typeof result.nextCursor === "string"
       ? result.nextCursor
-      : typeof result.next_cursor === "string"
-        ? result.next_cursor
-        : null;
+      : null;
   return { data, nextCursor: nextCursorRaw };
 }
 

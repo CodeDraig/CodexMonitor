@@ -24,7 +24,6 @@ export function SettingsComposerSection({
   onComposerPresetChange,
   onUpdateAppSettings,
 }: SettingsComposerSectionProps) {
-  const steerUnavailable = !appSettings.steerEnabled;
   return (
     <SettingsSection
       title="Composer"
@@ -56,8 +55,7 @@ export function SettingsComposerSection({
           <label
             className={`settings-segmented-option${
               appSettings.followUpMessageBehavior === "steer" ? " is-active" : ""
-            }${steerUnavailable ? " is-disabled" : ""}`}
-            title={steerUnavailable ? "Steer is unavailable in the current Codex config." : ""}
+            }`}
           >
             <input
               className="settings-segmented-input"
@@ -65,11 +63,7 @@ export function SettingsComposerSection({
               name="follow-up-behavior"
               value="steer"
               checked={appSettings.followUpMessageBehavior === "steer"}
-              disabled={steerUnavailable}
               onChange={() => {
-                if (steerUnavailable) {
-                  return;
-                }
                 void onUpdateAppSettings({
                   ...appSettings,
                   followUpMessageBehavior: "steer",
@@ -97,11 +91,6 @@ export function SettingsComposerSection({
             }
           />
         </SettingsToggleRow>
-        {steerUnavailable && (
-          <div className="settings-help">
-            Steer is unavailable in the current Codex config. Follow-ups will queue.
-          </div>
-        )}
       </div>
       <div className="settings-divider" />
       <div className="settings-subsection-title">Presets</div>

@@ -1,5 +1,4 @@
 mod commands;
-mod files;
 mod git;
 mod macos;
 mod settings;

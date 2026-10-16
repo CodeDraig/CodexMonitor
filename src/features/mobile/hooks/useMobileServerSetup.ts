@@ -1,3 +1,4 @@
+import { getActiveRemoteBackend, patchActiveRemoteBackend } from "@settings/utils/remoteBackends";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listWorkspaces } from "../../../services/tauri";
 import type { AppSettings } from "../../../types";
@@ -19,45 +20,12 @@ type UseMobileServerSetupResult = {
 };
 
 function isRemoteServerConfigured(settings: AppSettings): boolean {
-  return Boolean(settings.remoteBackendToken?.trim()) && Boolean(settings.remoteBackendHost.trim());
+  const remote = getActiveRemoteBackend(settings);
+  return Boolean(remote.token?.trim()) && Boolean(remote.host.trim());
 }
 
 function defaultMobileSetupMessage(): string {
   return "Enter your desktop Tailscale host and token, then run Connect & test.";
-}
-
-function markActiveRemoteBackendConnected(settings: AppSettings, connectedAtMs: number): AppSettings {
-  const existingBackends: AppSettings["remoteBackends"] =
-    settings.remoteBackends.length > 0
-      ? [...settings.remoteBackends]
-      : [
-          {
-            id: settings.activeRemoteBackendId ?? "remote-default",
-            name: "Primary remote",
-            provider: "tcp" as const,
-            host: settings.remoteBackendHost,
-            token: settings.remoteBackendToken,
-            lastConnectedAtMs: null,
-          },
-        ];
-  const activeIndexById =
-    settings.activeRemoteBackendId == null
-      ? -1
-      : existingBackends.findIndex((entry) => entry.id === settings.activeRemoteBackendId);
-  const activeIndex = activeIndexById >= 0 ? activeIndexById : 0;
-  const active = existingBackends[activeIndex];
-  existingBackends[activeIndex] = {
-    ...active,
-    provider: "tcp",
-    host: settings.remoteBackendHost,
-    token: settings.remoteBackendToken,
-    lastConnectedAtMs: connectedAtMs,
-  };
-  return {
-    ...settings,
-    remoteBackends: existingBackends,
-    activeRemoteBackendId: existingBackends[activeIndex]?.id ?? settings.activeRemoteBackendId,
-  };
 }
 
 export function useMobileServerSetup({
@@ -66,10 +34,11 @@ export function useMobileServerSetup({
   queueSaveSettings,
   refreshWorkspaces,
 }: UseMobileServerSetupParams): UseMobileServerSetupResult {
+  const activeRemote = getActiveRemoteBackend(appSettings);
   const isMobileRuntime = useMemo(() => isMobilePlatform(), []);
 
-  const [remoteHostDraft, setRemoteHostDraft] = useState(appSettings.remoteBackendHost);
-  const [remoteTokenDraft, setRemoteTokenDraft] = useState(appSettings.remoteBackendToken ?? "");
+  const [remoteHostDraft, setRemoteHostDraft] = useState(activeRemote.host);
+  const [remoteTokenDraft, setRemoteTokenDraft] = useState(activeRemote.token ?? "");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -81,11 +50,11 @@ export function useMobileServerSetup({
     if (!isMobileRuntime) {
       return;
     }
-    setRemoteHostDraft(appSettings.remoteBackendHost);
-    setRemoteTokenDraft(appSettings.remoteBackendToken ?? "");
+    setRemoteHostDraft(activeRemote.host);
+    setRemoteTokenDraft(activeRemote.token ?? "");
   }, [
-    appSettings.remoteBackendHost,
-    appSettings.remoteBackendToken,
+    activeRemote.host,
+    activeRemote.token,
     isMobileRuntime,
   ]);
 
@@ -145,15 +114,12 @@ export function useMobileServerSetup({
       setStatusMessage(null);
       try {
         const saved = await queueSaveSettings({
-          ...appSettings,
+          ...patchActiveRemoteBackend(appSettings, { host: nextHost, token: nextToken }),
           backendMode: "remote",
-          remoteBackendProvider: "tcp",
-          remoteBackendHost: nextHost,
-          remoteBackendToken: nextToken,
         });
         const connected = await runConnectivityCheck({ announceSuccess: true });
         if (connected) {
-          await queueSaveSettings(markActiveRemoteBackendConnected(saved, Date.now()));
+          await queueSaveSettings(patchActiveRemoteBackend(saved, { lastConnectedAtMs: Date.now() }));
         }
       } catch (error) {
         const message =

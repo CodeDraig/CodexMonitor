@@ -47,17 +47,12 @@ for line in sys.stdin:
         event("thread/tokenUsage/updated", {"turnId": turn, "tokenUsage": {"last": {"totalTokens": 12}, "total": {"totalTokens": 999}}})
         event("turn/completed", {"turn": {"id": turn, "status": "completed"}})
         result = {"turn": {"id": turn}}
-    elif method == "thread/read":
-        result = {"thread": {"turns": [{"id": "t1", "status": "inProgress" if Path("running").exists() else "completed", "items": [{"id": "output", "type": "agentMessage", "text": "legacy full result"}], "itemsView": "full"}]}}
     elif method == "thread/turns/list":
-        if Path("unsupported-history").exists():
-            emit({"id": request["id"], "error": {"message": "list_turns is not supported yet"}})
-            continue
         if params.get("cursor") and Path("fail-history").exists():
             emit({"id": request["id"], "error": {"message": "required history page failed"}})
             continue
         if params.get("cursor"):
             result = {"data": [{"id": "t2", "status": "completed", "items": [{"id": "output2", "type": "agentMessage", "text": "later result"}]}], "nextCursor": None}
         else:
-            result = {"data": [{"id": "t1", "status": "completed", "items": [{"id": "output", "type": "agentMessage", "text": "first result"}]}], "nextCursor": "page2"}
+            result = {"data": [{"id": "t1", "status": "inProgress" if Path("running").exists() else "completed", "items": [{"id": "output", "type": "agentMessage", "text": "first result"}]}], "nextCursor": "page2"}
     emit({"id": request["id"], "result": result})

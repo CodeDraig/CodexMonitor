@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, State};
 
-use super::files::{list_workspace_files_inner, read_workspace_file_inner, WorkspaceFileResponse};
+use crate::shared::workspace_files_core::{list_workspace_files_inner, read_workspace_file_inner, WorkspaceFileResponse};
 use super::git::{
     git_branch_exists, git_find_remote_for_branch, git_remote_branch_exists, git_remote_exists,
     is_missing_worktree_error, run_git_command_owned, unique_branch_name,
@@ -16,7 +16,7 @@ use super::worktree::{
     sanitize_worktree_name, unique_worktree_path, unique_worktree_path_for_rename,
 };
 
-use crate::backend::app_server::WorkspaceSession;
+use crate::backend::app_server::session::WorkspaceSession;
 use crate::codex::spawn_workspace_session;
 use crate::git_utils::resolve_git_root;
 use crate::remote_backend;

@@ -301,7 +301,6 @@ export default function MainApp() {
     setSelectedCollaborationModeId,
   } = useCollaborationModes({
     activeWorkspace,
-    enabled: appSettings.collaborationModesEnabled,
     preferredModeId: preferredCollabModeId,
     selectionKey: threadCodexSelectionKey,
     onDebug: addDebugEntry,
@@ -349,9 +348,7 @@ export default function MainApp() {
     modelShortcut: appSettings.composerModelShortcut,
     accessShortcut: appSettings.composerAccessShortcut,
     reasoningShortcut: appSettings.composerReasoningShortcut,
-    collaborationShortcut: appSettings.collaborationModesEnabled
-      ? appSettings.composerCollaborationShortcut
-      : null,
+    collaborationShortcut: appSettings.composerCollaborationShortcut,
     models,
     collaborationModes,
     selectedModelId,
@@ -506,7 +503,6 @@ export default function MainApp() {
     accessMode,
     ensureWorkspaceRuntimeCodexArgs,
     reviewDeliveryMode: appSettings.reviewDeliveryMode,
-    steerEnabled: appSettings.steerEnabled,
     threadTitleAutogenerationEnabled: appSettings.threadTitleAutogenerationEnabled,
     chatHistoryScrollbackItems: appSettingsLoading
       ? null
@@ -1119,8 +1115,8 @@ export default function MainApp() {
     },
     settings: {
       backendMode: appSettings.backendMode,
-      remoteBackendHost: appSettings.remoteBackendHost,
-      steerEnabled: appSettings.steerEnabled,
+      remoteBackends: appSettings.remoteBackends,
+      activeRemoteBackendId: appSettings.activeRemoteBackendId,
       followUpMessageBehavior: appSettings.followUpMessageBehavior,
       experimentalAppsEnabled: appSettings.experimentalAppsEnabled,
       pauseQueuedMessagesWhenResponseRequired:

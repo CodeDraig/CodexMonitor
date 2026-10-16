@@ -6,7 +6,7 @@ use tokio::process::Child;
 use tokio::sync::Mutex;
 
 use crate::dictation::DictationState;
-use crate::shared::codex_core::CodexLoginCancelState;
+use crate::shared::codex_core::login::CodexLoginCancelState;
 use crate::storage::{read_settings, read_workspaces};
 use crate::types::{AppSettings, TcpDaemonState, TcpDaemonStatus, WorkspaceEntry};
 
@@ -32,7 +32,7 @@ impl Default for TcpDaemonRuntime {
 
 pub(crate) struct AppState {
     pub(crate) workspaces: Mutex<HashMap<String, WorkspaceEntry>>,
-    pub(crate) sessions: Mutex<HashMap<String, Arc<crate::codex::WorkspaceSession>>>,
+    pub(crate) sessions: Mutex<HashMap<String, Arc<crate::backend::app_server::session::WorkspaceSession>>>,
     pub(crate) terminal_sessions: Mutex<HashMap<String, Arc<crate::terminal::TerminalSession>>>,
     pub(crate) remote_backend: Mutex<Option<crate::remote_backend::RemoteBackend>>,
     pub(crate) storage_path: PathBuf,

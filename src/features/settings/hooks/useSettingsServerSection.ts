@@ -1,3 +1,4 @@
+import { getActiveRemoteBackend, getConfiguredRemoteBackends, normalizeRemoteBackends } from "../utils/remoteBackends";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
@@ -94,27 +95,6 @@ type RemoteBackendTarget = AppSettings["remoteBackends"][number];
 const createRemoteBackendId = () =>
   `remote-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const buildFallbackRemoteBackend = (settings: AppSettings): RemoteBackendTarget => ({
-  id: settings.activeRemoteBackendId ?? "remote-default",
-  name: "Primary remote",
-  provider: "tcp",
-  host: settings.remoteBackendHost,
-  token: settings.remoteBackendToken,
-  lastConnectedAtMs: null,
-});
-
-const getConfiguredRemoteBackends = (settings: AppSettings): RemoteBackendTarget[] => {
-  if (settings.remoteBackends.length > 0) {
-    return settings.remoteBackends;
-  }
-  return [buildFallbackRemoteBackend(settings)];
-};
-
-const getActiveRemoteBackend = (settings: AppSettings): RemoteBackendTarget => {
-  const configured = getConfiguredRemoteBackends(settings);
-  return configured.find((entry) => entry.id === settings.activeRemoteBackendId) ?? configured[0];
-};
-
 const validateRemoteHost = (value: string): string | null => {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -191,41 +171,18 @@ export const useSettingsServerSection = ({
     setRemoteHostError(null);
   }, [activeRemoteBackend]);
 
-  const normalizeRemoteBackendEntry = (
-    entry: RemoteBackendTarget,
-    index: number,
-  ): RemoteBackendTarget => ({
-    id: entry.id?.trim() || `remote-${index + 1}`,
-    name: entry.name?.trim() || `Remote ${index + 1}`,
-    provider: "tcp",
-    host: entry.host?.trim() || DEFAULT_REMOTE_HOST,
-    token: entry.token?.trim() ? entry.token.trim() : null,
-    lastConnectedAtMs:
-      typeof entry.lastConnectedAtMs === "number" && Number.isFinite(entry.lastConnectedAtMs)
-        ? entry.lastConnectedAtMs
-        : null,
-  });
-
   const buildSettingsFromRemoteBackends = useCallback(
     (
       latestSettings: AppSettings,
       remoteBackends: RemoteBackendTarget[],
       preferredActiveId?: string | null,
     ): AppSettings => {
-      const normalizedBackends = remoteBackends.length
-        ? remoteBackends.map(normalizeRemoteBackendEntry)
-        : [normalizeRemoteBackendEntry(buildFallbackRemoteBackend(latestSettings), 0)];
-      const active =
-        normalizedBackends.find((entry) => entry.id === preferredActiveId) ??
-        normalizedBackends.find((entry) => entry.id === latestSettings.activeRemoteBackendId) ??
-        normalizedBackends[0];
+      const activeRemoteBackendId = remoteBackends.some((entry) => entry.id === preferredActiveId)
+        ? preferredActiveId ?? null
+        : latestSettings.activeRemoteBackendId;
       return {
         ...latestSettings,
-        remoteBackends: normalizedBackends,
-        activeRemoteBackendId: active.id,
-        remoteBackendProvider: "tcp",
-        remoteBackendHost: active.host,
-        remoteBackendToken: active.token,
+        ...normalizeRemoteBackends({ remoteBackends, activeRemoteBackendId }),
         ...(mobilePlatform
           ? {
               backendMode: "remote",
@@ -245,10 +202,7 @@ export const useSettingsServerSection = ({
         preferredActiveId,
       );
       const unchanged =
-        nextSettings.remoteBackendHost === latestSettings.remoteBackendHost &&
-        nextSettings.remoteBackendToken === latestSettings.remoteBackendToken &&
         nextSettings.backendMode === latestSettings.backendMode &&
-        nextSettings.remoteBackendProvider === latestSettings.remoteBackendProvider &&
         nextSettings.activeRemoteBackendId === latestSettings.activeRemoteBackendId &&
         JSON.stringify(nextSettings.remoteBackends) === JSON.stringify(latestSettings.remoteBackends);
       if (unchanged) {
@@ -631,7 +585,7 @@ export const useSettingsServerSection = ({
       handleRefreshTailscaleStatus();
     }
   }, [
-    appSettings.remoteBackendToken,
+    activeRemoteBackend.token,
     handleRefreshTailscaleCommandPreview,
     handleRefreshTailscaleStatus,
     handleTcpDaemonStatus,

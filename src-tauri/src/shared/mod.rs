@@ -18,3 +18,6 @@ pub(crate) mod workspaces_core;
 pub(crate) mod worktree_core;
 pub(crate) mod runs_core;
 pub(crate) mod runs_rpc;
+pub(crate) mod remote_settings;
+pub(crate) mod workspace_files_core;
+pub(crate) mod notifications_core;

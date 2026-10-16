@@ -17,7 +17,7 @@ For backend behavior, follow this path in order:
 4. App adapter: `src-tauri/src/{codex,workspaces,git,files,settings,prompts}/*`
 5. Shared core source of truth: `src-tauri/src/shared/*`
 6. Daemon RPC method parity: `src-tauri/src/bin/codex_monitor_daemon/rpc.rs`
-7. Daemon state/wiring implementation: `src-tauri/src/bin/codex_monitor_daemon.rs`
+7. Daemon command bindings: `src-tauri/src/bin/codex_monitor_daemon/rpc/*`
 8. Standalone daemon lifecycle CLI: `src-tauri/src/bin/codex_monitor_daemonctl.rs`
 
 If a behavior must work in both app and daemon, implement it in `src-tauri/src/shared/*` first.
@@ -94,7 +94,8 @@ Use TS/Vite aliases for refactor-safe imports:
 ## Backend App (Tauri) Navigation
 
 - Command registry (what frontend can invoke): `src-tauri/src/lib.rs`
-- Codex adapters: `src-tauri/src/codex/mod.rs`
+- Codex command adapters: `src-tauri/src/codex/{threads,subscriptions,turns,models,features,agents,account,login,skills,apps,approvals,mcp,metadata,installation}.rs`
+- App-specific Codex session startup: `src-tauri/src/codex/mod.rs`
 - Workspace/worktree adapters: `src-tauri/src/workspaces/commands.rs`
 - Git adapters: `src-tauri/src/git/mod.rs`
 - Settings adapters: `src-tauri/src/settings/mod.rs`
@@ -105,10 +106,12 @@ Use TS/Vite aliases for refactor-safe imports:
 
 ## Daemon Navigation
 
-- Daemon entrypoint and state/wiring: `src-tauri/src/bin/codex_monitor_daemon.rs`
+- Daemon startup and shared state: `src-tauri/src/bin/codex_monitor_daemon.rs`
+- Daemon CLI configuration: `src-tauri/src/bin/codex_monitor_daemon/config.rs`
+- Daemon event broadcasting: `src-tauri/src/bin/codex_monitor_daemon/events.rs`
 - Daemon lifecycle CLI (headless start/stop/status): `src-tauri/src/bin/codex_monitor_daemonctl.rs`
 - Daemon JSON-RPC dispatcher/router: `src-tauri/src/bin/codex_monitor_daemon/rpc.rs`
-- Daemon domain handlers: `src-tauri/src/bin/codex_monitor_daemon/rpc/*`
+- Daemon RPC parsing and shared-core bindings: `src-tauri/src/bin/codex_monitor_daemon/rpc/*`
 - Daemon transport: `src-tauri/src/bin/codex_monitor_daemon/transport.rs`
 
 When adding a new method, keep method names and payload shape aligned with `src/services/tauri.ts` and app commands in `src-tauri/src/lib.rs`.
@@ -117,12 +120,13 @@ When adding a new method, keep method names and payload shape aligned with `src/
 
 All cross-runtime domain behavior belongs in `src-tauri/src/shared/*`:
 
-- Codex threads/approvals/account/skills/config: `src-tauri/src/shared/codex_core.rs`
+- Codex threads/approvals/account/skills/config: `src-tauri/src/shared/codex_core/*`
 - Codex helper commands: `src-tauri/src/shared/codex_aux_core.rs`
 - Codex update/version helpers: `src-tauri/src/shared/codex_update_core.rs`
 - Workspaces/worktrees: `src-tauri/src/shared/workspaces_core.rs`, `src-tauri/src/shared/workspaces_core/*`, `src-tauri/src/shared/worktree_core.rs`
 - Settings model/update: `src-tauri/src/shared/settings_core.rs`
-- Files read/write: `src-tauri/src/shared/files_core.rs`
+- Config/Agents file reads and writes: `src-tauri/src/shared/files_core.rs`
+- Workspace file listing and bounded reads: `src-tauri/src/shared/workspace_files_core.rs`
 - Git and GitHub logic: `src-tauri/src/shared/git_core.rs`, `src-tauri/src/shared/git_ui_core.rs`, `src-tauri/src/shared/git_ui_core/*`
 - Prompts CRUD/listing: `src-tauri/src/shared/prompts_core.rs`
 - Usage snapshot and aggregation: `src-tauri/src/shared/local_usage_core.rs`
@@ -146,3 +150,15 @@ Keep Rust and TypeScript contracts in sync:
 - Frontend types: `src/types.ts`
 
 This is required for settings, workspace metadata, app-server payload handling, and RPC response decoding.
+
+## Message Rendering and Dictation
+
+- Message list composition: `src/features/messages/components/Messages.tsx`
+- Individual message, tool, diff, review, reasoning, and user-input rows: their named components in `src/features/messages/components/`
+- Message quoting and plan export: `src/features/messages/hooks/useMessageQuote.ts`, `src/features/messages/hooks/usePlanExport.ts`
+- Markdown composition: `src/features/messages/components/Markdown.tsx`; code-block copying: `MarkdownPreBlock.tsx`; link policy: `markdownLinks.tsx`
+- Markdown transformations: `src/features/messages/utils/normalizeListIndentation.ts`, `structuredReviewTables.ts`, `standaloneMarkdownTable.ts`
+- Desktop dictation session lifecycle: `src-tauri/src/dictation/real.rs`
+- Dictation model lifecycle, device capture, permissions, and transcription: `src-tauri/src/dictation/desktop/*`
+- Remote backend selection: `src/features/settings/utils/remoteBackends.ts`, `src-tauri/src/shared/remote_settings.rs`. The selected `remoteBackends` entry owns its connection details.
+- App-server startup: `src-tauri/src/backend/app_server.rs`; command resolution, sessions, event routing, and thread/workspace classification: `src-tauri/src/backend/app_server/*`

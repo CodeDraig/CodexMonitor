@@ -1,6 +1,3 @@
-#[cfg(all(target_os = "macos", debug_assertions))]
-use std::process::Command;
-
 #[tauri::command]
 pub(crate) async fn is_macos_debug_build() -> bool {
     cfg!(all(target_os = "macos", debug_assertions))
@@ -26,31 +23,5 @@ pub(crate) async fn app_build_type() -> String {
 /// a visible notification during local development.
 #[tauri::command]
 pub(crate) async fn send_notification_fallback(title: String, body: String) -> Result<(), String> {
-    #[cfg(all(target_os = "macos", debug_assertions))]
-    {
-        let escape = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!(
-            "display notification \"{}\" with title \"{}\"",
-            escape(&body),
-            escape(&title)
-        );
-
-        let status = Command::new("/usr/bin/osascript")
-            .arg("-e")
-            .arg(script)
-            .status()
-            .map_err(|error| format!("Failed to run osascript: {error}"))?;
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("osascript exited with status: {status}"))
-        }
-    }
-
-    #[cfg(not(all(target_os = "macos", debug_assertions)))]
-    {
-        let _ = (title, body);
-        Err("Notification fallback is only available on macOS debug builds.".to_string())
-    }
+    crate::shared::notifications_core::send_notification_fallback_core(title, body)
 }

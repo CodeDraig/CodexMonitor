@@ -1,3 +1,6 @@
+#[path = "../shared/remote_settings.rs"]
+mod remote_settings;
+
 #[path = "../daemon_binary.rs"]
 mod daemon_binary;
 #[allow(dead_code)]
@@ -304,7 +307,7 @@ fn resolve_listen_addr(
         return Ok(value);
     }
 
-    let from_settings = settings.map(|value| daemon_listen_addr(&value.remote_backend_host));
+    let from_settings = settings.map(|value| daemon_listen_addr(&remote_settings::active_remote_backend(value).host));
     let resolved = from_settings.unwrap_or_else(|| DEFAULT_LISTEN_ADDR.to_string());
     resolved
         .parse::<SocketAddr>()
@@ -316,7 +319,7 @@ fn resolve_token(token_arg: Option<&str>, settings: Option<&AppSettings>) -> Opt
     trim_non_empty(token_arg)
         .or_else(|| trim_non_empty(env::var("CODEX_MONITOR_DAEMON_TOKEN").ok().as_deref()))
         .or_else(|| {
-            settings.and_then(|value| trim_non_empty(value.remote_backend_token.as_deref()))
+            settings.and_then(|value| trim_non_empty(remote_settings::active_remote_backend(value).token.as_deref()))
         })
 }
 

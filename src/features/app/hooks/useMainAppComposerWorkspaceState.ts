@@ -1,3 +1,4 @@
+import { getActiveRemoteBackend } from "@settings/utils/remoteBackends";
 import { useMemo, type RefObject } from "react";
 import type {
   AppSettings,
@@ -51,8 +52,8 @@ type UseMainAppComposerWorkspaceStateArgs = {
   settings: Pick<
     AppSettings,
     | "backendMode"
-    | "remoteBackendHost"
-    | "steerEnabled"
+    | "remoteBackends"
+    | "activeRemoteBackendId"
     | "followUpMessageBehavior"
     | "experimentalAppsEnabled"
     | "pauseQueuedMessagesWhenResponseRequired"
@@ -185,7 +186,7 @@ export function useMainAppComposerWorkspaceState({
     ? threadStatusById[activeThreadId]?.isReviewing ?? false
     : false;
   const activeTurnId = activeThreadId ? activeTurnIdByThread[activeThreadId] ?? null : null;
-  const steerAvailable = settings.steerEnabled && Boolean(activeTurnId);
+  const steerAvailable = Boolean(activeTurnId);
   const hasUserInputRequestForActiveThread = Boolean(
     activeThreadId &&
       userInputRequests.some(
@@ -232,7 +233,6 @@ export function useMainAppComposerWorkspaceState({
     isProcessing,
     isReviewing,
     queueFlushPaused,
-    steerEnabled: settings.steerEnabled,
     followUpMessageBehavior: settings.followUpMessageBehavior,
     appsEnabled: settings.experimentalAppsEnabled,
     connectWorkspace,
@@ -250,7 +250,7 @@ export function useMainAppComposerWorkspaceState({
   });
 
   const workspaceHomeState = useWorkspaceHome({
-    backendKey: `${settings.backendMode}:${settings.remoteBackendHost}`,
+    backendKey: `${settings.backendMode}:${getActiveRemoteBackend(settings).host}`,
     visible: showWorkspaceHome,
     activeWorkspace,
     models: modelOptions,

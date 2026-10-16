@@ -101,13 +101,13 @@ pub(crate) async fn read_image_as_data_url(
         return Err("Image conversion is only supported in remote backend mode or on mobile runtimes".to_string());
     }
 
-    let normalized = codex_core::normalize_file_path(trimmed_path);
+    let normalized = codex_core::images::normalize_file_path(trimmed_path);
     if normalized.is_empty() {
         return Err("Image path is required".to_string());
     }
 
     let _ = app;
-    codex_core::read_image_as_data_url_core(&normalized)
+    codex_core::images::read_image_as_data_url_core(&normalized)
 }
 
 #[tauri::command]

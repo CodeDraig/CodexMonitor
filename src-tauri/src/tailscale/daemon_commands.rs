@@ -68,8 +68,9 @@ pub(super) async fn tailscale_daemon_command_preview(
         .map(|path| path.to_path_buf())
         .ok_or_else(|| "Unable to resolve app data directory".to_string())?;
     let settings = state.app_settings.lock().await.clone();
-    let token_configured = settings
-        .remote_backend_token
+    let remote = crate::shared::remote_settings::active_remote_backend(&settings);
+    let token_configured = remote
+        .token
         .as_deref()
         .map(str::trim)
         .map(|value| !value.is_empty())
@@ -90,8 +91,9 @@ pub(super) async fn tailscale_daemon_start(
     }
 
     let settings = state.app_settings.lock().await.clone();
-    let token = settings
-        .remote_backend_token
+    let remote = crate::shared::remote_settings::active_remote_backend(&settings);
+    let token = remote
+        .token
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -241,6 +243,7 @@ pub(super) async fn tailscale_daemon_stop(
     state: State<'_, AppState>,
 ) -> Result<TcpDaemonStatus, String> {
     let settings = state.app_settings.lock().await.clone();
+    let remote = crate::shared::remote_settings::active_remote_backend(&settings);
     let configured_listen_addr = configured_daemon_listen_addr(&settings);
     let listen_port = parse_port_from_remote_host(&configured_listen_addr);
 
@@ -252,7 +255,7 @@ pub(super) async fn tailscale_daemon_stop(
     } else if let Some(port) = listen_port {
         match probe_daemon(
             &configured_listen_addr,
-            settings.remote_backend_token.as_deref(),
+            remote.token.as_deref(),
         )
         .await
         {
@@ -260,7 +263,7 @@ pub(super) async fn tailscale_daemon_stop(
                 let force_kill_allowed = can_force_stop_daemon(auth_ok, info.as_ref());
                 if let Err(shutdown_error) = request_daemon_shutdown(
                     &configured_listen_addr,
-                    settings.remote_backend_token.as_deref(),
+                    remote.token.as_deref(),
                 )
                 .await
                 {
@@ -282,7 +285,7 @@ pub(super) async fn tailscale_daemon_stop(
                     }
                 } else if !wait_for_daemon_shutdown(
                     &configured_listen_addr,
-                    settings.remote_backend_token.as_deref(),
+                    remote.token.as_deref(),
                 )
                 .await
                 {
@@ -321,7 +324,7 @@ pub(super) async fn tailscale_daemon_stop(
 
     let probe_after_stop = probe_daemon(
         &configured_listen_addr,
-        settings.remote_backend_token.as_deref(),
+        remote.token.as_deref(),
     )
     .await;
     let pid_after_stop = match listen_port {
@@ -366,6 +369,7 @@ pub(super) async fn tailscale_daemon_status(
     state: State<'_, AppState>,
 ) -> Result<TcpDaemonStatus, String> {
     let settings = state.app_settings.lock().await.clone();
+    let remote = crate::shared::remote_settings::active_remote_backend(&settings);
     let configured_listen_addr = configured_daemon_listen_addr(&settings);
     let listen_port = parse_port_from_remote_host(&configured_listen_addr);
 
@@ -379,7 +383,7 @@ pub(super) async fn tailscale_daemon_status(
         };
         runtime.status = match probe_daemon(
             &configured_listen_addr,
-            settings.remote_backend_token.as_deref(),
+            remote.token.as_deref(),
         )
         .await
         {

@@ -252,7 +252,7 @@ fn daemon_connect_addr(listen_addr: &str) -> Option<String> {
 }
 
 fn configured_daemon_listen_addr(settings: &crate::types::AppSettings) -> String {
-    daemon_listen_addr(&settings.remote_backend_host)
+    daemon_listen_addr(&crate::shared::remote_settings::active_remote_backend(settings).host)
 }
 
 fn sync_tcp_daemon_listen_addr(status: &mut TcpDaemonStatus, configured_listen_addr: &str) {

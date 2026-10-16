@@ -9,10 +9,6 @@ use crate::utils::normalize_windows_namespace_path;
 
 pub(crate) async fn get_app_settings_core(app_settings: &Mutex<AppSettings>) -> AppSettings {
     let mut settings = app_settings.lock().await.clone();
-    // Steering and collaboration modes are core protocol capabilities now.
-    // Ignore historical feature flags that could disable working UI controls.
-    settings.steer_enabled = true;
-    settings.collaboration_modes_enabled = true;
     if let Ok(Some(unified_exec_enabled)) = codex_config::read_unified_exec_enabled() {
         settings.unified_exec_enabled = unified_exec_enabled;
     }
@@ -84,13 +80,13 @@ mod tests {
                 let before = std::fs::read(&path).unwrap();
                 let current = Mutex::new(initial.clone());
                 let mut changed = initial;
-                changed.personality = "pragmatic".into();
+                changed.theme = "dark".into();
                 assert!(update_app_settings_at(changed, &current, &path, &root)
                     .await
                     .is_err());
                 assert_eq!(std::fs::read(&path).unwrap(), before);
                 assert_eq!(std::fs::read_to_string(&config).unwrap(), contents);
-                assert_ne!(current.lock().await.personality, "pragmatic");
+                assert_ne!(current.lock().await.theme, "dark");
             }
         });
     }
@@ -122,9 +118,7 @@ mod tests {
             let path = root.join("settings.json");
             let current = Mutex::new(AppSettings::default());
             let mut settings = AppSettings::default();
-            settings.personality = "pragmatic".into();
             settings.experimental_apps_enabled = true;
-            settings.steer_enabled = true;
             update_app_settings_at(settings.clone(), &current, &path, &root)
                 .await
                 .unwrap();

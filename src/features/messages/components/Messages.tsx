@@ -11,16 +11,14 @@ import { PlanReadyFollowupMessage } from "../../app/components/PlanReadyFollowup
 import { RequestUserInputMessage } from "../../app/components/RequestUserInputMessage";
 import { useFileLinkOpener } from "../hooks/useFileLinkOpener";
 import { formatCount, parseReasoning } from "../utils/messageRenderUtils";
-import {
-  DiffRow,
-  ExploreRow,
-  MessageRow,
-  ReasoningRow,
-  ReviewRow,
-  ToolRow,
-  UserInputRow,
-  WorkingIndicator,
-} from "./MessageRows";
+import { DiffRow } from "./DiffRow";
+import { ExploreRow } from "./ExploreRow";
+import { MessageRow } from "./MessageRow";
+import { ReasoningRow } from "./ReasoningRow";
+import { ReviewRow } from "./ReviewRow";
+import { ToolRow } from "./ToolRow";
+import { UserInputRow } from "./UserInputRow";
+import { WorkingIndicator } from "./WorkingIndicator";
 import { useMessagesViewState } from "./useMessagesViewState";
 
 type MessagesProps = {

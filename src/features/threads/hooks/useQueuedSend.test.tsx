@@ -19,7 +19,6 @@ const makeOptions = (
   activeTurnId: "turn-1",
   isProcessing: false,
   isReviewing: false,
-  steerEnabled: false,
   followUpMessageBehavior: "queue" as const,
   appsEnabled: true,
   activeWorkspace: workspace,
@@ -129,8 +128,8 @@ describe("useQueuedSend", () => {
     expect(options.sendUserMessage).toHaveBeenCalledWith("Alpha", []);
   });
 
-  it("queues send while processing when steer is disabled", async () => {
-    const options = makeOptions({ isProcessing: true, steerEnabled: false });
+  it("queues send while processing when queue is preferred", async () => {
+    const options = makeOptions({ isProcessing: true });
     const { result } = renderHook((props) => useQueuedSend(props), {
       initialProps: options,
     });
@@ -144,10 +143,9 @@ describe("useQueuedSend", () => {
     expect(result.current.activeQueue[0]?.text).toBe("Queued");
   });
 
-  it("sends immediately while processing when steer is enabled", async () => {
+  it("sends immediately while processing when steer is preferred", async () => {
     const options = makeOptions({
       isProcessing: true,
-      steerEnabled: true,
       followUpMessageBehavior: "steer",
     });
     const { result } = renderHook((props) => useQueuedSend(props), {
@@ -171,7 +169,6 @@ describe("useQueuedSend", () => {
   it("queues send while processing when steer is enabled but turn id is unavailable", async () => {
     const options = makeOptions({
       isProcessing: true,
-      steerEnabled: true,
       followUpMessageBehavior: "steer",
       activeTurnId: null,
     });
@@ -195,7 +192,6 @@ describe("useQueuedSend", () => {
       .mockResolvedValueOnce({ status: "sent" });
     const options = makeOptions({
       isProcessing: true,
-      steerEnabled: true,
       followUpMessageBehavior: "steer",
       sendUserMessage,
     });
@@ -530,7 +526,7 @@ describe("useQueuedSend", () => {
   });
 
   it("does not send when reviewing even if steer is enabled", async () => {
-    const options = makeOptions({ isReviewing: true, steerEnabled: true });
+    const options = makeOptions({ isReviewing: true });
     const { result } = renderHook((props) => useQueuedSend(props), {
       initialProps: options,
     });

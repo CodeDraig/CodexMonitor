@@ -32,15 +32,9 @@ const workspaceTwoConnected: WorkspaceInfo = {
 
 const makeModesResponse = () => ({
   result: {
-    data: [{ mode: "plan" }, { mode: "default" }],
+    data: [{ name: "Plan", mode: "plan", model: null, reasoning_effort: null }, { name: "Default", mode: "default", model: null, reasoning_effort: null }],
   },
 });
-
-const makeModesResponseArrayResult = () => ({
-  result: [{ mode: "plan" }, { mode: "default" }],
-});
-
-const makeModesResponseTopLevelArray = () => [{ mode: "plan" }, { mode: "default" }];
 
 describe("useCollaborationModes", () => {
   afterEach(() => {
@@ -51,10 +45,10 @@ describe("useCollaborationModes", () => {
     vi.mocked(getCollaborationModes).mockImplementation(async () => makeModesResponse());
 
     const { result, rerender } = renderHook(
-      ({ workspace, enabled }: { workspace: WorkspaceInfo | null; enabled: boolean }) =>
-        useCollaborationModes({ activeWorkspace: workspace, enabled }),
+      ({ workspace }: { workspace: WorkspaceInfo | null }) =>
+        useCollaborationModes({ activeWorkspace: workspace }),
       {
-        initialProps: { workspace: workspaceOne, enabled: true },
+        initialProps: { workspace: workspaceOne },
       },
     );
 
@@ -65,11 +59,11 @@ describe("useCollaborationModes", () => {
     });
     expect(result.current.selectedCollaborationModeId).toBe("plan");
 
-    rerender({ workspace: workspaceTwoDisconnected, enabled: true });
+    rerender({ workspace: workspaceTwoDisconnected });
     expect(result.current.selectedCollaborationModeId).toBe("plan");
     expect(result.current.collaborationModes).toEqual([]);
 
-    rerender({ workspace: workspaceTwoConnected, enabled: true });
+    rerender({ workspace: workspaceTwoConnected });
 
     await waitFor(() => {
       expect(getCollaborationModes).toHaveBeenCalledWith("workspace-2");
@@ -77,59 +71,6 @@ describe("useCollaborationModes", () => {
     });
   });
 
-  it("resets the selection when the feature is disabled", async () => {
-    vi.mocked(getCollaborationModes).mockResolvedValue(makeModesResponse());
-
-    const { result, rerender } = renderHook(
-      ({ workspace, enabled }: { workspace: WorkspaceInfo | null; enabled: boolean }) =>
-        useCollaborationModes({ activeWorkspace: workspace, enabled }),
-      {
-        initialProps: { workspace: workspaceOne, enabled: true },
-      },
-    );
-
-    await waitFor(() => expect(result.current.selectedCollaborationModeId).toBe("default"));
-
-    act(() => {
-      result.current.setSelectedCollaborationModeId("plan");
-    });
-    expect(result.current.selectedCollaborationModeId).toBe("plan");
-
-    rerender({ workspace: workspaceOne, enabled: false });
-
-    expect(result.current.selectedCollaborationModeId).toBeNull();
-    expect(result.current.collaborationModes).toEqual([]);
-  });
-
-  it("accepts alternate response shapes from the backend", async () => {
-    vi.mocked(getCollaborationModes)
-      .mockResolvedValueOnce(makeModesResponseArrayResult() as any)
-      .mockResolvedValueOnce(makeModesResponseTopLevelArray() as any);
-
-    const { result, rerender } = renderHook(
-      ({ workspace }: { workspace: WorkspaceInfo | null }) =>
-        useCollaborationModes({ activeWorkspace: workspace, enabled: true }),
-      {
-        initialProps: { workspace: workspaceOne },
-      },
-    );
-
-    await waitFor(() =>
-      expect(result.current.collaborationModes.map((mode) => mode.id)).toEqual([
-        "plan",
-        "default",
-      ]),
-    );
-
-    rerender({ workspace: { ...workspaceOne, id: "workspace-1b" } });
-
-    await waitFor(() =>
-      expect(result.current.collaborationModes.map((mode) => mode.id)).toEqual([
-        "plan",
-        "default",
-      ]),
-    );
-  });
 
   it("resets to the workspace default when selectionKey changes and preferredModeId is null", async () => {
     vi.mocked(getCollaborationModes).mockResolvedValue(makeModesResponse());
@@ -137,25 +78,21 @@ describe("useCollaborationModes", () => {
     const { result, rerender } = renderHook(
       ({
         workspace,
-        enabled,
         preferredModeId,
         selectionKey,
       }: {
         workspace: WorkspaceInfo | null;
-        enabled: boolean;
         preferredModeId: string | null;
         selectionKey: string | null;
       }) =>
         useCollaborationModes({
           activeWorkspace: workspace,
-          enabled,
           preferredModeId,
           selectionKey,
         }),
       {
         initialProps: {
           workspace: workspaceOne,
-          enabled: true,
           preferredModeId: "default" as string | null,
           selectionKey: "thread-a",
         },
@@ -172,7 +109,6 @@ describe("useCollaborationModes", () => {
     // Thread switch with no stored override: preferredModeId is null.
     rerender({
       workspace: workspaceOne,
-      enabled: true,
       preferredModeId: null,
       selectionKey: "thread-b",
     });
@@ -185,19 +121,16 @@ describe("useCollaborationModes", () => {
 
     const { result, rerender } = renderHook(
       (props: {
-        enabled: boolean;
         preferredModeId: string | null;
         selectionKey: string;
       }) =>
         useCollaborationModes({
           activeWorkspace: workspaceOne,
-          enabled: props.enabled,
           preferredModeId: props.preferredModeId,
           selectionKey: props.selectionKey,
         }),
       {
         initialProps: {
-          enabled: true,
           preferredModeId: "plan",
           selectionKey: "thread-a",
         },
@@ -210,7 +143,6 @@ describe("useCollaborationModes", () => {
     expect(result.current.selectedCollaborationModeId).toBe("plan");
 
     rerender({
-      enabled: true,
       preferredModeId: "stale-mode-id",
       selectionKey: "thread-b",
     });
@@ -220,49 +152,5 @@ describe("useCollaborationModes", () => {
     });
   });
 
-  it("reapplies preferred mode when collaboration is re-enabled on the same thread", async () => {
-    vi.mocked(getCollaborationModes).mockResolvedValue(makeModesResponse());
 
-    const { result, rerender } = renderHook(
-      (props: {
-        enabled: boolean;
-        preferredModeId: string | null;
-        selectionKey: string;
-      }) =>
-        useCollaborationModes({
-          activeWorkspace: workspaceOne,
-          enabled: props.enabled,
-          preferredModeId: props.preferredModeId,
-          selectionKey: props.selectionKey,
-        }),
-      {
-        initialProps: {
-          enabled: true,
-          preferredModeId: "plan",
-          selectionKey: "thread-a",
-        },
-      },
-    );
-
-    await waitFor(() => {
-      expect(result.current.selectedCollaborationModeId).toBe("plan");
-    });
-
-    rerender({
-      enabled: false,
-      preferredModeId: "plan",
-      selectionKey: "thread-a",
-    });
-    expect(result.current.selectedCollaborationModeId).toBeNull();
-
-    rerender({
-      enabled: true,
-      preferredModeId: "plan",
-      selectionKey: "thread-a",
-    });
-
-    await waitFor(() => {
-      expect(result.current.selectedCollaborationModeId).toBe("plan");
-    });
-  });
 });

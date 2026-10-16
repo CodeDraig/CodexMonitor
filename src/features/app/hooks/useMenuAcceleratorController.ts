@@ -68,9 +68,7 @@ export function useMenuAcceleratorController({ appSettings, onDebug }: Params) {
       },
       {
         id: "composer_cycle_collaboration",
-        shortcut: appSettings.collaborationModesEnabled
-          ? appSettings.composerCollaborationShortcut
-          : null,
+        shortcut: appSettings.composerCollaborationShortcut,
       },
     ],
     [
@@ -82,7 +80,6 @@ export function useMenuAcceleratorController({ appSettings, onDebug }: Params) {
       appSettings.cycleAgentPrevShortcut,
       appSettings.cycleWorkspaceNextShortcut,
       appSettings.cycleWorkspacePrevShortcut,
-      appSettings.collaborationModesEnabled,
       appSettings.newAgentShortcut,
       appSettings.newCloneAgentShortcut,
       appSettings.newWorktreeAgentShortcut,

@@ -1,4 +1,9 @@
-use super::*;
+use super::{parse_optional_string, parse_string};
+use crate::shared::prompts_core;
+use crate::shared::prompts_core::CustomPromptEntry;
+use crate::DaemonState;
+use serde_json::json;
+use serde_json::Value;
 
 pub(super) async fn try_handle(
     state: &DaemonState,
@@ -145,5 +150,99 @@ pub(super) async fn try_handle(
             Some(serde_json::to_value(prompt).map_err(|err| err.to_string()))
         }
         _ => None,
+    }
+}
+
+impl DaemonState {
+    pub(crate) async fn prompts_list(
+        &self,
+        workspace_id: String,
+    ) -> Result<Vec<CustomPromptEntry>, String> {
+        prompts_core::prompts_list_core(&self.workspaces, &self.settings_path, workspace_id).await
+    }
+
+    pub(crate) async fn prompts_workspace_dir(
+        &self,
+        workspace_id: String,
+    ) -> Result<String, String> {
+        prompts_core::prompts_workspace_dir_core(
+            &self.workspaces,
+            &self.settings_path,
+            workspace_id,
+        )
+        .await
+    }
+
+    pub(crate) async fn prompts_global_dir(&self, workspace_id: String) -> Result<String, String> {
+        prompts_core::prompts_global_dir_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn prompts_create(
+        &self,
+        workspace_id: String,
+        scope: String,
+        name: String,
+        description: Option<String>,
+        argument_hint: Option<String>,
+        content: String,
+    ) -> Result<CustomPromptEntry, String> {
+        prompts_core::prompts_create_core(
+            &self.workspaces,
+            &self.settings_path,
+            workspace_id,
+            scope,
+            name,
+            description,
+            argument_hint,
+            content,
+        )
+        .await
+    }
+
+    pub(crate) async fn prompts_update(
+        &self,
+        workspace_id: String,
+        path: String,
+        name: String,
+        description: Option<String>,
+        argument_hint: Option<String>,
+        content: String,
+    ) -> Result<CustomPromptEntry, String> {
+        prompts_core::prompts_update_core(
+            &self.workspaces,
+            &self.settings_path,
+            workspace_id,
+            path,
+            name,
+            description,
+            argument_hint,
+            content,
+        )
+        .await
+    }
+
+    pub(crate) async fn prompts_delete(
+        &self,
+        workspace_id: String,
+        path: String,
+    ) -> Result<(), String> {
+        prompts_core::prompts_delete_core(&self.workspaces, &self.settings_path, workspace_id, path)
+            .await
+    }
+
+    pub(crate) async fn prompts_move(
+        &self,
+        workspace_id: String,
+        path: String,
+        scope: String,
+    ) -> Result<CustomPromptEntry, String> {
+        prompts_core::prompts_move_core(
+            &self.workspaces,
+            &self.settings_path,
+            workspace_id,
+            path,
+            scope,
+        )
+        .await
     }
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-use crate::backend::app_server::check_codex_installation;
+use crate::backend::app_server::command::check_codex_installation;
 use crate::shared::process_core::tokio_command;
 use crate::types::AppSettings;
 

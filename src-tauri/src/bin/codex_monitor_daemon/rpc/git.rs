@@ -1,40 +1,19 @@
-use super::*;
+use super::{
+    parse_optional_bool, parse_optional_string, parse_optional_u32, serialize_ok, serialize_result,
+};
+use crate::events::emit_background_thread_hide;
+use crate::shared::codex_aux_core;
 use crate::shared::git_rpc;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::future::Future;
-
-fn parse_git_request<T: DeserializeOwned>(params: &Value) -> Result<T, String> {
-    git_rpc::from_params(params)
-}
-
-fn serialize_value<T: Serialize>(value: T) -> Result<Value, String> {
-    serde_json::to_value(value).map_err(|err| err.to_string())
-}
-
-async fn serialize_result<T, Fut>(future: Fut) -> Result<Value, String>
-where
-    T: Serialize,
-    Fut: Future<Output = Result<T, String>>,
-{
-    future.await.and_then(serialize_value)
-}
-
-async fn serialize_ok<Fut>(future: Fut) -> Result<Value, String>
-where
-    Fut: Future<Output = Result<(), String>>,
-{
-    future.await.map(|_| json!({ "ok": true }))
-}
-
-macro_rules! parse_request_or_err {
-    ($params:expr, $ty:ty) => {
-        match parse_git_request::<$ty>($params) {
-            Ok(value) => value,
-            Err(err) => return Some(Err(err)),
-        }
-    };
-}
+use crate::shared::git_ui_core;
+use crate::types::GitCommitDiff;
+use crate::types::GitFileDiff;
+use crate::types::GitHubIssuesResponse;
+use crate::types::GitHubPullRequestComment;
+use crate::types::GitHubPullRequestDiff;
+use crate::types::GitHubPullRequestsResponse;
+use crate::types::GitLogResponse;
+use crate::DaemonState;
+use serde_json::Value;
 
 pub(super) async fn try_handle(
     state: &DaemonState,
@@ -192,5 +171,231 @@ pub(super) async fn try_handle(
             )
         }
         _ => None,
+    }
+}
+
+impl DaemonState {
+    pub(crate) async fn get_git_status(&self, workspace_id: String) -> Result<Value, String> {
+        git_ui_core::get_git_status_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn init_git_repo(
+        &self,
+        workspace_id: String,
+        branch: String,
+        force: bool,
+    ) -> Result<Value, String> {
+        git_ui_core::init_git_repo_core(&self.workspaces, workspace_id, branch, force).await
+    }
+
+    pub(crate) async fn create_github_repo(
+        &self,
+        workspace_id: String,
+        repo: String,
+        visibility: String,
+        branch: Option<String>,
+    ) -> Result<Value, String> {
+        git_ui_core::create_github_repo_core(
+            &self.workspaces,
+            workspace_id,
+            repo,
+            visibility,
+            branch,
+        )
+        .await
+    }
+
+    pub(crate) async fn list_git_roots(
+        &self,
+        workspace_id: String,
+        depth: Option<usize>,
+    ) -> Result<Vec<String>, String> {
+        git_ui_core::list_git_roots_core(&self.workspaces, workspace_id, depth).await
+    }
+
+    pub(crate) async fn get_git_diffs(
+        &self,
+        workspace_id: String,
+    ) -> Result<Vec<GitFileDiff>, String> {
+        git_ui_core::get_git_diffs_core(&self.workspaces, &self.app_settings, workspace_id).await
+    }
+
+    pub(crate) async fn get_git_log(
+        &self,
+        workspace_id: String,
+        limit: Option<usize>,
+    ) -> Result<GitLogResponse, String> {
+        git_ui_core::get_git_log_core(&self.workspaces, workspace_id, limit).await
+    }
+
+    pub(crate) async fn get_git_commit_diff(
+        &self,
+        workspace_id: String,
+        sha: String,
+    ) -> Result<Vec<GitCommitDiff>, String> {
+        git_ui_core::get_git_commit_diff_core(
+            &self.workspaces,
+            &self.app_settings,
+            workspace_id,
+            sha,
+        )
+        .await
+    }
+
+    pub(crate) async fn get_git_remote(
+        &self,
+        workspace_id: String,
+    ) -> Result<Option<String>, String> {
+        git_ui_core::get_git_remote_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn stage_git_file(
+        &self,
+        workspace_id: String,
+        path: String,
+    ) -> Result<(), String> {
+        git_ui_core::stage_git_file_core(&self.workspaces, workspace_id, path).await
+    }
+
+    pub(crate) async fn stage_git_all(&self, workspace_id: String) -> Result<(), String> {
+        git_ui_core::stage_git_all_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn unstage_git_file(
+        &self,
+        workspace_id: String,
+        path: String,
+    ) -> Result<(), String> {
+        git_ui_core::unstage_git_file_core(&self.workspaces, workspace_id, path).await
+    }
+
+    pub(crate) async fn revert_git_file(
+        &self,
+        workspace_id: String,
+        path: String,
+    ) -> Result<(), String> {
+        git_ui_core::revert_git_file_core(&self.workspaces, workspace_id, path).await
+    }
+
+    pub(crate) async fn revert_git_all(&self, workspace_id: String) -> Result<(), String> {
+        git_ui_core::revert_git_all_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn commit_git(
+        &self,
+        workspace_id: String,
+        message: String,
+    ) -> Result<(), String> {
+        git_ui_core::commit_git_core(&self.workspaces, workspace_id, message).await
+    }
+
+    pub(crate) async fn push_git(&self, workspace_id: String) -> Result<(), String> {
+        git_ui_core::push_git_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn pull_git(&self, workspace_id: String) -> Result<(), String> {
+        git_ui_core::pull_git_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn fetch_git(&self, workspace_id: String) -> Result<(), String> {
+        git_ui_core::fetch_git_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn sync_git(&self, workspace_id: String) -> Result<(), String> {
+        git_ui_core::sync_git_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn get_github_issues(
+        &self,
+        workspace_id: String,
+    ) -> Result<GitHubIssuesResponse, String> {
+        git_ui_core::get_github_issues_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn get_github_pull_requests(
+        &self,
+        workspace_id: String,
+    ) -> Result<GitHubPullRequestsResponse, String> {
+        git_ui_core::get_github_pull_requests_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn get_github_pull_request_diff(
+        &self,
+        workspace_id: String,
+        pr_number: u64,
+    ) -> Result<Vec<GitHubPullRequestDiff>, String> {
+        git_ui_core::get_github_pull_request_diff_core(&self.workspaces, workspace_id, pr_number)
+            .await
+    }
+
+    pub(crate) async fn get_github_pull_request_comments(
+        &self,
+        workspace_id: String,
+        pr_number: u64,
+    ) -> Result<Vec<GitHubPullRequestComment>, String> {
+        git_ui_core::get_github_pull_request_comments_core(
+            &self.workspaces,
+            workspace_id,
+            pr_number,
+        )
+        .await
+    }
+
+    pub(crate) async fn checkout_github_pull_request(
+        &self,
+        workspace_id: String,
+        pr_number: u64,
+    ) -> Result<(), String> {
+        git_ui_core::checkout_github_pull_request_core(&self.workspaces, workspace_id, pr_number)
+            .await
+    }
+
+    pub(crate) async fn list_git_branches(&self, workspace_id: String) -> Result<Value, String> {
+        git_ui_core::list_git_branches_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn checkout_git_branch(
+        &self,
+        workspace_id: String,
+        name: String,
+    ) -> Result<(), String> {
+        git_ui_core::checkout_git_branch_core(&self.workspaces, workspace_id, name).await
+    }
+
+    pub(crate) async fn create_git_branch(
+        &self,
+        workspace_id: String,
+        name: String,
+    ) -> Result<(), String> {
+        git_ui_core::create_git_branch_core(&self.workspaces, workspace_id, name).await
+    }
+
+    pub(crate) async fn generate_commit_message(
+        &self,
+        workspace_id: String,
+        commit_message_model_id: Option<String>,
+    ) -> Result<String, String> {
+        let repo_root = git_ui_core::resolve_repo_root_for_workspace_core(
+            &self.workspaces,
+            workspace_id.clone(),
+        )
+        .await?;
+        let diff = git_ui_core::collect_workspace_diff_core(&repo_root)?;
+        let commit_message_prompt = {
+            let settings = self.app_settings.lock().await;
+            settings.commit_message_prompt.clone()
+        };
+        codex_aux_core::generate_commit_message_core(
+            &self.sessions,
+            &self.workspaces,
+            workspace_id,
+            &diff,
+            &commit_message_prompt,
+            commit_message_model_id.as_deref(),
+            |workspace_id, thread_id| {
+                emit_background_thread_hide(&self.event_sink, workspace_id, thread_id);
+            },
+        )
+        .await
     }
 }

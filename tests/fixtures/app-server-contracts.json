@@ -10,5 +10,7 @@
   "CommandExecutionRequestApprovalResponse": [{"decision":"accept"},{"decision":"decline"},{"decision":"acceptForSession"},{"decision":"cancel"}],
   "FileChangeRequestApprovalResponse": [{"decision":"accept"},{"decision":"decline"}],
   "McpServerElicitationRequestResponse": [{"action":"accept","content":{"count":3,"enabled":false}},{"action":"accept"},{"action":"decline"},{"action":"cancel"}],
-  "ExperimentalFeatureEnablementSetParams": [{"enablement":{"apps":true}}]
+  "ExperimentalFeatureEnablementSetParams": [{"enablement":{"apps":true}}],
+  "CollaborationModeListResponse": [{"data":[{"name":"Plan","mode":"plan","model":"fixture-model","reasoning_effort":"high"},{"name":"Custom"}]}],
+  "ExperimentalFeatureListResponse": [{"data":[{"name":"fixture","stage":"underDevelopment","enabled":true,"defaultEnabled":false,"displayName":null,"description":null,"announcement":null}],"nextCursor":null}]
 }

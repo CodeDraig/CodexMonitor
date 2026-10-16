@@ -2,6 +2,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings, CodexDoctorResult } from "@/types";
+import { defaultRemoteBackend, getActiveRemoteBackend } from "../utils/remoteBackends";
 import { useAppSettings } from "./useAppSettings";
 import {
   getAppSettings,
@@ -35,8 +36,7 @@ describe("useAppSettings", () => {
         uiScale: UI_SCALE_MAX + 1,
         theme: "nope" as unknown as AppSettings["theme"],
         backendMode: "remote",
-        remoteBackendHost: "example:1234",
-        personality: "unknown",
+        remoteBackends: [{ ...defaultRemoteBackend(), host: "example:1234" }],
         uiFontFamily: "",
         codeFontFamily: "  ",
         codeFontSize: 25,
@@ -52,9 +52,8 @@ describe("useAppSettings", () => {
     expect(result.current.settings.uiFontFamily).toContain("system-ui");
     expect(result.current.settings.codeFontFamily).toContain("ui-monospace");
     expect(result.current.settings.codeFontSize).toBe(16);
-    expect(result.current.settings.personality).toBe("friendly");
     expect(result.current.settings.backendMode).toBe("remote");
-    expect(result.current.settings.remoteBackendHost).toBe("example:1234");
+    expect(getActiveRemoteBackend(result.current.settings).host).toBe("example:1234");
   });
 
   it("keeps defaults when getAppSettings fails", async () => {

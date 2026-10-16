@@ -111,9 +111,6 @@ export function getThreadListNextCursor(result: Record<string, unknown>) {
   if (typeof result.nextCursor === "string") {
     return result.nextCursor;
   }
-  if (typeof result.next_cursor === "string") {
-    return result.next_cursor;
-  }
   return null;
 }
 

@@ -52,7 +52,6 @@ type UseThreadMessagingOptions = {
   collaborationMode?: Record<string, unknown> | null;
   onSelectServiceTier?: (tier: ServiceTier | null | undefined) => void;
   reviewDeliveryMode?: "inline" | "detached";
-  steerEnabled: boolean;
   customPrompts: CustomPromptOption[];
   ensureWorkspaceRuntimeCodexArgs?: (
     workspaceId: string,
@@ -106,7 +105,6 @@ export function useThreadMessaging({
   collaborationMode,
   onSelectServiceTier,
   reviewDeliveryMode = "inline",
-  steerEnabled,
   customPrompts,
   ensureWorkspaceRuntimeCodexArgs,
   shouldPreflightRuntimeCodexArgsForSend,
@@ -173,7 +171,6 @@ export function useThreadMessaging({
           effort,
           serviceTier,
           collaborationMode,
-          steerEnabled,
           isProcessing,
           activeTurnId,
         },
@@ -358,7 +355,6 @@ export function useThreadMessaging({
       recordThreadActivity,
       safeMessageActivity,
       setActiveTurnId,
-      steerEnabled,
       threadStatusById,
     ],
   );

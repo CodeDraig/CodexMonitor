@@ -47,7 +47,7 @@ Run commands use an `input` envelope on both the Tauri and daemon surfaces:
 
 `create_run` and manual capture request UUIDs are idempotent. Metadata and comparison writes require `expectedRevision`. Read the Rust contracts in `runs_core/types.rs` and the frontend contracts in `src/features/runs/types.ts` for payload fields.
 
-The app-server reader queues recording work for registered threads. History uses paginated full-item reads, with a full `thread/read` fallback only when the server explicitly reports `list_turns is not supported yet`. A failed reconciliation read does not create a primary capture for an active turn. Database writes, paginated history reads, and Git capture execute outside the reader loop. The daemon continues recording when its client disconnects. When an app-server starts, it restores known run tracking and attempts history recovery. Unknown operation identities are never guessed from titles or prompt similarity.
+The app-server reader queues recording work for registered threads. History requires paginated full-item reads through `thread/turns/list`; servers without this capability return an error. A failed reconciliation read does not create a primary capture for an active turn. Database writes, paginated history reads, and Git capture execute outside the reader loop. The daemon continues recording when its client disconnects. When an app-server starts, it restores known run tracking and attempts history recovery. Unknown operation identities are never guessed from titles or prompt similarity.
 
 ## Validation
 

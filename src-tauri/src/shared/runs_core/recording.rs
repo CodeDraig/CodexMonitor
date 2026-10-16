@@ -3,7 +3,7 @@ use super::{
     store::{with_store, Result},
     types::*,
 };
-use crate::backend::app_server::WorkspaceSession;
+use crate::backend::app_server::session::WorkspaceSession;
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::mpsc;

@@ -4,7 +4,7 @@ use super::runs_core::{
     store::with_store,
     types::*,
 };
-use crate::{backend::app_server::WorkspaceSession, types::WorkspaceEntry};
+use crate::{backend::app_server::session::WorkspaceSession, types::WorkspaceEntry};
 use base64::Engine;
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -72,7 +72,7 @@ pub(crate) async fn dispatch(
                             .decode(data)
                             .map_err(|e| e.to_string())
                     } else {
-                        std::fs::read(crate::shared::codex_core::normalize_file_path(image))
+                        std::fs::read(crate::shared::codex_core::images::normalize_file_path(image))
                             .map_err(|e| e.to_string())
                     }
                 })

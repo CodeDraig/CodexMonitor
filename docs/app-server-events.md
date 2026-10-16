@@ -9,13 +9,13 @@ Protocol documentation: https://learn.chatgpt.com/docs/app-server
 - Initialization must return a successful JSON-RPC result before the backend emits `codex/connected`. Configuration warnings, runtime warnings, deprecations, failed MCP startup, and model rerouting reach visible diagnostics and Debug.
 - Command and file approvals return decision objects. Permission approvals return the selected filesystem/network grant and explicit turn/session scope. Command allowlists never auto-accept permission grants or network/additional-permission requests.
 - MCP elicitation supports standard `form` and HTTP(S) `url` modes. Device verification and OpenAI-specific forms require another client; the prompt remains visible with decline/cancel controls. `serverRequest/resolved` removes pending approvals and user-input requests.
-- Resume requests use `excludeTurns: true`. The shared backend reads every `thread/turns/list` page with ascending order and `itemsView: full`, deduplicates anchor turns, and returns the existing IPC thread snapshot only after all pages succeed. It does not treat summary or failed pages as complete history. This works for legacy and paginated histories; very long histories still require a complete load before display, and the existing frontend scrollback limit applies.
+- Resume requests use `excludeTurns: true`. The shared backend reads every `thread/turns/list` page with ascending order and `itemsView: full`, deduplicates anchor turns, and returns the existing IPC thread snapshot only after all pages succeed. It does not treat summary or failed pages as complete history. Paginated history support is required; very long histories still require a complete load before display, and the existing frontend scrollback limit applies.
 - History hydration retains messages changed during loading and does not overwrite newer live turn state. Fork uses `excludeTurns: true` and hydrates through resume.
 - Foreground subscription verifies loaded threads or resumes the stored thread. Foreground detach deliberately retains the shared server subscription so background work and approvals continue. It does not call `thread/unsubscribe`, which could remove monitoring needed by another view.
 - Current item variants render through existing message/tool/image components. Unknown variants retain an inspectable tool record. Generated images use the existing image viewer; subagent activity contributes parent links. File patch updates and MCP tool progress update conversation items.
 - Steering and collaboration modes do not depend on removed Codex feature flags. Personality selection is not offered. Existing obsolete config entries are preserved, but settings saves do not write them.
 - Feature settings persist through the shared config writer. `apps` and `plugins` also update loaded app-server processes through `experimentalFeature/enablement/set`; runtime errors identify the persisted-but-not-applied state. Other feature changes require an app-server restart.
-- Model discovery follows pagination, excludes hidden entries, and retains advertised input modalities and service-tier metadata. The composer rejects image submission to a model explicitly advertising no image support. `skills/changed` refreshes skills; the legacy notification is also accepted.
+- Model discovery follows pagination, excludes hidden entries, and retains advertised input modalities and service-tier metadata. The composer rejects image submission to a model explicitly advertising no image support. `skills/changed` refreshes skills.
 
 ## Supported notifications
 
@@ -313,7 +313,7 @@ Not implemented:
 - Method inventory: `src/utils/appServerEvents.ts`; routing: `src/features/app/hooks/useAppServerEvents.ts`.
 - Requests: `useThreadApprovals.ts`, `useThreadApprovalEvents.ts`, `ApprovalToasts.tsx`, `ServerRequestForm.tsx`.
 - State and hydration: `useThreadActions.ts`, `useThreadsReducer.ts`, `threadReducer/threadItemsSlice.ts`.
-- Rendering conversion: `src/utils/threadItems.conversion.ts`; messages: `src/features/messages/components/MessageRows.tsx`.
+- Rendering conversion: `src/utils/threadItems.conversion.ts`; messages: `src/features/messages/components/Messages.tsx` and the item-specific row components alongside it.
 
 ## Refresh and verification
 

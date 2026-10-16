@@ -18,7 +18,6 @@ export function useComposerController({
   isProcessing,
   isReviewing,
   queueFlushPaused = false,
-  steerEnabled,
   followUpMessageBehavior,
   appsEnabled,
   connectWorkspace,
@@ -41,7 +40,6 @@ export function useComposerController({
   isProcessing: boolean;
   isReviewing: boolean;
   queueFlushPaused?: boolean;
-  steerEnabled: boolean;
   followUpMessageBehavior: FollowUpMessageBehavior;
   appsEnabled: boolean;
   connectWorkspace: (workspace: WorkspaceInfo) => Promise<void>;
@@ -99,7 +97,6 @@ export function useComposerController({
     isProcessing,
     isReviewing,
     queueFlushPaused,
-    steerEnabled,
     followUpMessageBehavior,
     appsEnabled,
     activeWorkspace,

@@ -11,37 +11,17 @@ pub(crate) fn rpc_result(response: &Value) -> Result<&Value, String> {
         .ok_or_else(|| "Codex app-server returned an invalid response".to_string())
 }
 
-// Some installed app-servers advertise paginated history but explicitly reject
-// list_turns. Only that capability error permits the full thread/read fallback.
 pub(crate) async fn load_session_turns(
-    session: &crate::backend::app_server::WorkspaceSession,
+    session: &crate::backend::app_server::session::WorkspaceSession,
     workspace: &str,
     thread_id: &str,
 ) -> Result<Vec<Value>, String> {
-    match load_turns(thread_id, |params| {
+    load_turns(thread_id, |params| {
         session.send_request_for_workspace(workspace, "thread/turns/list", params)
-    }).await {
-        Err(error) if error == "list_turns is not supported yet" => {
-            let response = session.send_request_for_workspace(workspace, "thread/read",
-                json!({"threadId": thread_id, "includeTurns": true})).await?;
-            let turns = rpc_result(&response)?.pointer("/thread/turns")
-                .and_then(Value::as_array).ok_or("Codex full thread history is missing turns")?;
-            for turn in turns {
-                if turn.get("id").and_then(Value::as_str).is_none()
-                    || !turn.get("items").is_some_and(Value::is_array)
-                    || turn.get("itemsView").and_then(Value::as_str).is_some_and(|view| view != "full") {
-                    return Err("Codex returned incomplete full thread history".into());
-                }
-            }
-            Ok(turns.clone())
-        }
-        result => result,
-    }
+    }).await
 }
 
-// Preserve the existing app/daemon IPC contract while reading both legacy and
-// paginated histories through the current protocol. Never return a partial
-// snapshot as complete when a page fails.
+// Return a complete, ordered snapshot only after every full-items page succeeds.
 pub(crate) async fn load_turns<F, Fut>(thread_id: &str, mut request: F) -> Result<Vec<Value>, String>
 where
     F: FnMut(Value) -> Fut,

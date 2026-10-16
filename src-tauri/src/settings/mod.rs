@@ -1,3 +1,4 @@
+use crate::shared::remote_settings::active_remote_backend;
 use tauri::{State, Window};
 
 use crate::shared::settings_core::{
@@ -50,10 +51,12 @@ fn should_reset_remote_backend(previous: &AppSettings, updated: &AppSettings) ->
             crate::types::BackendMode::Remote
         )
     );
+    let previous_remote = active_remote_backend(previous);
+    let updated_remote = active_remote_backend(updated);
     backend_mode_changed
-        || previous.remote_backend_provider != updated.remote_backend_provider
-        || previous.remote_backend_host != updated.remote_backend_host
-        || previous.remote_backend_token != updated.remote_backend_token
+        || previous_remote.provider != updated_remote.provider
+        || previous_remote.host != updated_remote.host
+        || previous_remote.token != updated_remote.token
 }
 
 async fn ensure_remote_runtime_for_settings(settings: &AppSettings, state: State<'_, AppState>) {
@@ -73,11 +76,10 @@ mod tests {
     use crate::types::{AppSettings, BackendMode};
 
     #[test]
-    fn should_reset_remote_backend_when_provider_changes() {
+    fn should_reset_remote_backend_when_host_changes() {
         let previous = AppSettings::default();
         let mut updated = previous.clone();
-        updated.remote_backend_provider = crate::types::RemoteBackendProvider::Tcp;
-        updated.remote_backend_host = "remote.example:4732".to_string();
+        updated.remote_backends[0].host = "remote.example:4732".to_string();
         assert!(should_reset_remote_backend(&previous, &updated));
     }
 
@@ -85,7 +87,7 @@ mod tests {
     fn should_reset_remote_backend_when_transport_token_changes() {
         let previous = AppSettings::default();
         let mut updated = previous.clone();
-        updated.remote_backend_token = Some("token-1".to_string());
+        updated.remote_backends[0].token = Some("token-1".to_string());
         assert!(should_reset_remote_backend(&previous, &updated));
     }
 
@@ -96,5 +98,22 @@ mod tests {
         updated.theme = "dark".to_string();
         updated.backend_mode = BackendMode::Local;
         assert!(!should_reset_remote_backend(&previous, &updated));
+    }
+
+    #[test]
+    fn resets_for_selection_changes_but_not_inactive_entry_or_timestamp_changes() {
+        let mut previous = AppSettings::default();
+        previous.remote_backends.push(crate::types::RemoteBackendTarget {
+            id: "second".into(),
+            host: "second:5732".into(),
+            token: Some("token".into()),
+            ..crate::types::RemoteBackendTarget::default()
+        });
+        let mut updated = previous.clone();
+        updated.remote_backends[1].host = "inactive:6732".into();
+        updated.remote_backends[0].last_connected_at_ms = Some(123);
+        assert!(!should_reset_remote_backend(&previous, &updated));
+        updated.active_remote_backend_id = Some("second".into());
+        assert!(should_reset_remote_backend(&previous, &updated));
     }
 }

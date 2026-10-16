@@ -1,65 +1,21 @@
-use super::*;
+use super::{serialize_ok, serialize_result, serialize_value};
+use crate::backend::app_server::spawn_workspace_session;
+use crate::shared::git_core;
+use crate::shared::runs_core::types::RunContext;
 use crate::shared::workspace_rpc;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::future::Future;
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FileReadRequest {
-    scope: file_policy::FileScope,
-    kind: file_policy::FileKind,
-    workspace_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FileWriteRequest {
-    scope: file_policy::FileScope,
-    kind: file_policy::FileKind,
-    workspace_id: Option<String>,
-    content: String,
-}
-
-fn parse_file_read_request(params: &Value) -> Result<FileReadRequest, String> {
-    serde_json::from_value(params.clone()).map_err(|err| err.to_string())
-}
-
-fn parse_file_write_request(params: &Value) -> Result<FileWriteRequest, String> {
-    serde_json::from_value(params.clone()).map_err(|err| err.to_string())
-}
-
-fn parse_workspace_request<T: DeserializeOwned>(params: &Value) -> Result<T, String> {
-    workspace_rpc::from_params(params)
-}
-
-fn serialize_value<T: Serialize>(value: T) -> Result<Value, String> {
-    serde_json::to_value(value).map_err(|err| err.to_string())
-}
-
-async fn serialize_result<T, Fut>(future: Fut) -> Result<Value, String>
-where
-    T: Serialize,
-    Fut: Future<Output = Result<T, String>>,
-{
-    future.await.and_then(serialize_value)
-}
-
-async fn serialize_ok<Fut>(future: Fut) -> Result<Value, String>
-where
-    Fut: Future<Output = Result<(), String>>,
-{
-    future.await.map(|_| json!({ "ok": true }))
-}
-
-macro_rules! parse_request_or_err {
-    ($params:expr, $ty:ty) => {
-        match parse_workspace_request::<$ty>($params) {
-            Ok(value) => value,
-            Err(err) => return Some(Err(err)),
-        }
-    };
-}
+use crate::shared::workspaces_core;
+use crate::shared::worktree_core;
+use crate::storage::read_workspaces;
+use crate::types::WorkspaceInfo;
+use crate::types::WorkspaceSettings;
+use crate::types::WorktreeSetupStatus;
+#[cfg(target_os = "macos")]
+use crate::workspace_macos;
+use crate::workspace_settings::apply_workspace_settings_update;
+use crate::DaemonState;
+use serde_json::Value;
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 pub(super) async fn try_handle(
     state: &DaemonState,
@@ -178,17 +134,6 @@ pub(super) async fn try_handle(
                 .await,
             )
         }
-        "list_workspace_files" => {
-            let request = parse_request_or_err!(params, workspace_rpc::WorkspaceIdRequest);
-            Some(serialize_result(state.list_workspace_files(request.workspace_id)).await)
-        }
-        "read_workspace_file" => {
-            let request = parse_request_or_err!(params, workspace_rpc::ReadWorkspaceFileRequest);
-            Some(
-                serialize_result(state.read_workspace_file(request.workspace_id, request.path))
-                    .await,
-            )
-        }
         "add_clone" => {
             let request = parse_request_or_err!(params, workspace_rpc::AddCloneRequest);
             Some(
@@ -200,47 +145,6 @@ pub(super) async fn try_handle(
                 ))
                 .await,
             )
-        }
-        "file_read" => {
-            let request = match parse_file_read_request(params) {
-                Ok(value) => value,
-                Err(err) => return Some(Err(err)),
-            };
-            Some(
-                serialize_result(state.file_read(
-                    request.scope,
-                    request.kind,
-                    request.workspace_id,
-                ))
-                .await,
-            )
-        }
-        "file_write" => {
-            let request = match parse_file_write_request(params) {
-                Ok(value) => value,
-                Err(err) => return Some(Err(err)),
-            };
-            Some(
-                serialize_ok(state.file_write(
-                    request.scope,
-                    request.kind,
-                    request.workspace_id,
-                    request.content,
-                ))
-                .await,
-            )
-        }
-        "get_app_settings" => Some(serialize_value(state.get_app_settings().await)),
-        "update_app_settings" => {
-            let settings_value = match params {
-                Value::Object(map) => map.get("settings").cloned().unwrap_or(Value::Null),
-                _ => Value::Null,
-            };
-            let settings: AppSettings = match serde_json::from_value(settings_value) {
-                Ok(value) => value,
-                Err(err) => return Some(Err(err.to_string())),
-            };
-            Some(serialize_result(state.update_app_settings(settings)).await)
         }
         "apply_worktree_changes" => {
             let request = parse_request_or_err!(params, workspace_rpc::WorkspaceIdRequest);
@@ -264,11 +168,431 @@ pub(super) async fn try_handle(
             let request = parse_request_or_err!(params, workspace_rpc::GetOpenAppIconRequest);
             Some(serialize_result(state.get_open_app_icon(request.app_name)).await)
         }
-        "local_usage_snapshot" => {
-            let days = parse_optional_u32(params, "days");
-            let workspace_path = parse_optional_string(params, "workspacePath");
-            Some(serialize_result(state.local_usage_snapshot(days, workspace_path)).await)
-        }
         _ => None,
+    }
+}
+
+impl DaemonState {
+    pub(crate) async fn sync_workspaces_from_storage(&self) {
+        let stored = match read_workspaces(&self.storage_path) {
+            Ok(stored) => stored,
+            Err(err) => {
+                eprintln!(
+                    "daemon: failed to read workspaces from {}: {err}",
+                    self.storage_path.display()
+                );
+                return;
+            }
+        };
+        let workspace_ids: HashSet<String> = stored.keys().cloned().collect();
+        {
+            let mut workspaces = self.workspaces.lock().await;
+            *workspaces = stored;
+        }
+
+        workspaces_core::prune_workspace_sessions_core(&self.sessions, &workspace_ids).await;
+    }
+
+    pub(crate) async fn list_workspaces(&self) -> Vec<WorkspaceInfo> {
+        self.sync_workspaces_from_storage().await;
+        workspaces_core::list_workspaces_core(&self.workspaces, &self.sessions).await
+    }
+
+    pub(crate) async fn is_workspace_path_dir(&self, path: String) -> bool {
+        workspaces_core::is_workspace_path_dir_core(&path)
+    }
+
+    pub(crate) async fn add_workspace(
+        &self,
+        path: String,
+        client_version: String,
+    ) -> Result<WorkspaceInfo, String> {
+        let client_version = client_version.clone();
+        workspaces_core::add_workspace_core(
+            path,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            &self.storage_path,
+            move |entry, default_bin, codex_args, codex_home| {
+                spawn_workspace_session(
+                    entry,
+                    default_bin,
+                    codex_args,
+                    codex_home,
+                    client_version.clone(),
+                    self.event_sink.clone(),
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn add_workspace_from_git_url(
+        &self,
+        url: String,
+        destination_path: String,
+        target_folder_name: Option<String>,
+        client_version: String,
+    ) -> Result<WorkspaceInfo, String> {
+        let client_version = client_version.clone();
+        workspaces_core::add_workspace_from_git_url_core(
+            url,
+            destination_path,
+            target_folder_name,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            &self.storage_path,
+            move |entry, default_bin, codex_args, codex_home| {
+                spawn_workspace_session(
+                    entry,
+                    default_bin,
+                    codex_args,
+                    codex_home,
+                    client_version.clone(),
+                    self.event_sink.clone(),
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn add_worktree(
+        &self,
+        parent_id: String,
+        branch: String,
+        name: Option<String>,
+        copy_agents_md: bool,
+        run_context: Option<RunContext>,
+        client_version: String,
+    ) -> Result<WorkspaceInfo, String> {
+        let client_version = client_version.clone();
+        workspaces_core::add_worktree_core(
+            parent_id,
+            branch,
+            name,
+            copy_agents_md,
+            run_context,
+            &self.data_dir,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            &self.storage_path,
+            |value| worktree_core::sanitize_worktree_name(value),
+            |root, name| worktree_core::unique_worktree_path_strict(root, name),
+            |root, branch_name| {
+                let root = root.clone();
+                let branch_name = branch_name.to_string();
+                async move { git_core::git_branch_exists(&root, &branch_name).await }
+            },
+            Some(|root: &PathBuf, branch_name: &str| {
+                let root = root.clone();
+                let branch_name = branch_name.to_string();
+                async move { git_core::git_find_remote_tracking_branch_local(&root, &branch_name).await }
+            }),
+            |root, args| {
+                workspaces_core::run_git_command_unit(root, args, git_core::run_git_command_owned)
+            },
+            move |entry, default_bin, codex_args, codex_home| {
+                spawn_workspace_session(entry, default_bin, codex_args, codex_home, client_version.clone(), self.event_sink.clone())
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn worktree_setup_status(
+        &self,
+        workspace_id: String,
+    ) -> Result<WorktreeSetupStatus, String> {
+        workspaces_core::worktree_setup_status_core(&self.workspaces, &workspace_id, &self.data_dir)
+            .await
+    }
+
+    pub(crate) async fn worktree_setup_mark_ran(&self, workspace_id: String) -> Result<(), String> {
+        workspaces_core::worktree_setup_mark_ran_core(
+            &self.workspaces,
+            &workspace_id,
+            &self.data_dir,
+        )
+        .await
+    }
+
+    pub(crate) async fn remove_workspace(&self, id: String) -> Result<(), String> {
+        workspaces_core::remove_workspace_core(
+            id,
+            &self.workspaces,
+            &self.sessions,
+            &self.storage_path,
+            |root, args| {
+                workspaces_core::run_git_command_unit(root, args, git_core::run_git_command_owned)
+            },
+            |error| git_core::is_missing_worktree_error(error),
+            |path| {
+                std::fs::remove_dir_all(path)
+                    .map_err(|err| format!("Failed to remove worktree folder: {err}"))
+            },
+            true,
+            true,
+        )
+        .await
+    }
+
+    pub(crate) async fn remove_worktree(&self, id: String) -> Result<(), String> {
+        workspaces_core::remove_worktree_core(
+            id,
+            &self.workspaces,
+            &self.sessions,
+            &self.storage_path,
+            |root, args| {
+                workspaces_core::run_git_command_unit(root, args, git_core::run_git_command_owned)
+            },
+            |error| git_core::is_missing_worktree_error(error),
+            |path| {
+                std::fs::remove_dir_all(path)
+                    .map_err(|err| format!("Failed to remove worktree folder: {err}"))
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn rename_worktree(
+        &self,
+        id: String,
+        branch: String,
+        client_version: String,
+    ) -> Result<WorkspaceInfo, String> {
+        let client_version = client_version.clone();
+        workspaces_core::rename_worktree_core(
+            id,
+            branch,
+            &self.data_dir,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            &self.storage_path,
+            |entry| Ok(PathBuf::from(entry.path.clone())),
+            |root, name| {
+                let root = root.clone();
+                let name = name.to_string();
+                async move {
+                    git_core::unique_branch_name_live(&root, &name, None)
+                        .await
+                        .map(|(branch_name, _was_suffixed)| branch_name)
+                }
+            },
+            |value| worktree_core::sanitize_worktree_name(value),
+            |root, name, current| {
+                worktree_core::unique_worktree_path_for_rename(root, name, current)
+            },
+            |root, args| {
+                workspaces_core::run_git_command_unit(root, args, git_core::run_git_command_owned)
+            },
+            move |entry, default_bin, codex_args, codex_home| {
+                spawn_workspace_session(
+                    entry,
+                    default_bin,
+                    codex_args,
+                    codex_home,
+                    client_version.clone(),
+                    self.event_sink.clone(),
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn rename_worktree_upstream(
+        &self,
+        id: String,
+        old_branch: String,
+        new_branch: String,
+    ) -> Result<(), String> {
+        workspaces_core::rename_worktree_upstream_core(
+            id,
+            old_branch,
+            new_branch,
+            &self.workspaces,
+            |entry| Ok(PathBuf::from(entry.path.clone())),
+            |root, branch_name| {
+                let root = root.clone();
+                let branch_name = branch_name.to_string();
+                async move { git_core::git_branch_exists(&root, &branch_name).await }
+            },
+            |root, branch_name| {
+                let root = root.clone();
+                let branch_name = branch_name.to_string();
+                async move { git_core::git_find_remote_for_branch_live(&root, &branch_name).await }
+            },
+            |root, remote| {
+                let root = root.clone();
+                let remote = remote.to_string();
+                async move { git_core::git_remote_exists(&root, &remote).await }
+            },
+            |root, remote, branch_name| {
+                let root = root.clone();
+                let remote = remote.to_string();
+                let branch_name = branch_name.to_string();
+                async move {
+                    git_core::git_remote_branch_exists_live(&root, &remote, &branch_name).await
+                }
+            },
+            |root, args| {
+                workspaces_core::run_git_command_unit(root, args, git_core::run_git_command_owned)
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn update_workspace_settings(
+        &self,
+        id: String,
+        settings: WorkspaceSettings,
+        client_version: String,
+    ) -> Result<WorkspaceInfo, String> {
+        let client_version = client_version.clone();
+        workspaces_core::update_workspace_settings_core(
+            id,
+            settings,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            &self.storage_path,
+            |workspaces, workspace_id, next_settings| {
+                apply_workspace_settings_update(workspaces, workspace_id, next_settings)
+            },
+            move |entry, default_bin, codex_args, codex_home| {
+                spawn_workspace_session(
+                    entry,
+                    default_bin,
+                    codex_args,
+                    codex_home,
+                    client_version.clone(),
+                    self.event_sink.clone(),
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn connect_workspace(
+        &self,
+        id: String,
+        client_version: String,
+    ) -> Result<(), String> {
+        {
+            let sessions = self.sessions.lock().await;
+            if sessions.contains_key(&id) {
+                return Ok(());
+            }
+        }
+
+        let client_version = client_version.clone();
+        workspaces_core::connect_workspace_core(
+            id,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            move |entry, default_bin, codex_args, codex_home| {
+                spawn_workspace_session(
+                    entry,
+                    default_bin,
+                    codex_args,
+                    codex_home,
+                    client_version.clone(),
+                    self.event_sink.clone(),
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn set_workspace_runtime_codex_args(
+        &self,
+        workspace_id: String,
+        codex_args: Option<String>,
+        client_version: String,
+    ) -> Result<workspaces_core::WorkspaceRuntimeCodexArgsResult, String> {
+        workspaces_core::set_workspace_runtime_codex_args_core(
+            workspace_id,
+            codex_args,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            move |entry, default_bin, next_args, codex_home| {
+                spawn_workspace_session(
+                    entry,
+                    default_bin,
+                    next_args,
+                    codex_home,
+                    client_version.clone(),
+                    self.event_sink.clone(),
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn add_clone(
+        &self,
+        source_workspace_id: String,
+        copies_folder: String,
+        copy_name: String,
+        client_version: String,
+    ) -> Result<WorkspaceInfo, String> {
+        workspaces_core::add_clone_core(
+            source_workspace_id,
+            copy_name,
+            copies_folder,
+            &self.workspaces,
+            &self.sessions,
+            &self.app_settings,
+            &self.storage_path,
+            |entry, default_bin, codex_args, codex_home| {
+                spawn_workspace_session(
+                    entry,
+                    default_bin,
+                    codex_args,
+                    codex_home,
+                    client_version.clone(),
+                    self.event_sink.clone(),
+                )
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn apply_worktree_changes(&self, workspace_id: String) -> Result<(), String> {
+        workspaces_core::apply_worktree_changes_core(&self.workspaces, workspace_id).await
+    }
+
+    pub(crate) async fn open_workspace_in(
+        &self,
+        path: String,
+        app: Option<String>,
+        args: Vec<String>,
+        command: Option<String>,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<(), String> {
+        workspaces_core::open_workspace_in_core(path, app, args, command, line, column).await
+    }
+
+    pub(crate) async fn get_open_app_icon(
+        &self,
+        app_name: String,
+    ) -> Result<Option<String>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            return workspaces_core::get_open_app_icon_core(app_name, |name| {
+                workspace_macos::get_open_app_icon_inner(name)
+            })
+            .await;
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            workspaces_core::get_open_app_icon_core(app_name, |_name| None).await
+        }
     }
 }

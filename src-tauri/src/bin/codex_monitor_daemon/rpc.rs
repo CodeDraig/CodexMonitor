@@ -1,17 +1,41 @@
-use super::*;
+use crate::events::DaemonEvent;
+use crate::DaemonState;
+use serde::Serialize;
+use serde_json::json;
+use serde_json::Value;
+use std::future::Future;
+use std::sync::Arc;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::Semaphore;
 
-#[path = "rpc/codex.rs"]
-mod codex;
-#[path = "rpc/daemon.rs"]
-mod daemon;
-#[path = "rpc/dispatcher.rs"]
-mod dispatcher;
-#[path = "rpc/git.rs"]
-mod git;
-#[path = "rpc/prompts.rs"]
-mod prompts;
-#[path = "rpc/workspace.rs"]
-mod workspace;
+fn serialize_value<T: Serialize>(value: T) -> Result<Value, String> {
+    serde_json::to_value(value).map_err(|err| err.to_string())
+}
+
+async fn serialize_result<T, Fut>(future: Fut) -> Result<Value, String>
+where
+    T: Serialize,
+    Fut: Future<Output = Result<T, String>>,
+{
+    future.await.and_then(serialize_value)
+}
+
+async fn serialize_ok<Fut>(future: Fut) -> Result<Value, String>
+where
+    Fut: Future<Output = Result<(), String>>,
+{
+    future.await.map(|_| json!({ "ok": true }))
+}
+
+macro_rules! parse_request_or_err {
+    ($params:expr, $ty:ty) => {
+        match serde_json::from_value::<$ty>($params.clone()) {
+            Ok(value) => value,
+            Err(err) => return Some(Err(err.to_string())),
+        }
+    };
+}
 
 pub(super) fn build_error_response(id: Option<u64>, message: &str) -> Option<String> {
     let id = id?;
@@ -85,10 +109,7 @@ pub(super) fn parse_optional_string(value: &Value, key: &str) -> Option<String> 
     }
 }
 
-pub(super) fn parse_optional_nullable_string(
-    value: &Value,
-    key: &str,
-) -> Option<Option<String>> {
+pub(super) fn parse_optional_nullable_string(value: &Value, key: &str) -> Option<Option<String>> {
     match value {
         Value::Object(map) => match map.get(key) {
             Some(Value::Null) => Some(None),
@@ -199,3 +220,34 @@ pub(super) fn spawn_rpc_response_task(
         }
     });
 }
+
+#[path = "rpc/account.rs"]
+mod account;
+#[path = "rpc/agents.rs"]
+mod agents;
+#[path = "rpc/approvals.rs"]
+mod approvals;
+#[path = "rpc/catalog.rs"]
+mod catalog;
+#[path = "rpc/daemon.rs"]
+mod daemon;
+#[path = "rpc/dispatcher.rs"]
+mod dispatcher;
+#[path = "rpc/files.rs"]
+mod files;
+#[path = "rpc/git.rs"]
+mod git;
+#[path = "rpc/metadata.rs"]
+mod metadata;
+#[path = "rpc/prompts.rs"]
+mod prompts;
+#[path = "rpc/settings.rs"]
+mod settings;
+#[path = "rpc/threads.rs"]
+mod threads;
+#[path = "rpc/turns.rs"]
+mod turns;
+#[path = "rpc/usage.rs"]
+mod usage;
+#[path = "rpc/workspace.rs"]
+mod workspace;

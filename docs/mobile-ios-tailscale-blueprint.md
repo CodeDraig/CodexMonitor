@@ -12,8 +12,8 @@ This document is the canonical runbook for iOS remote usage with a desktop-hoste
 ## Current Architecture
 
 1. Desktop CodexMonitor hosts the daemon and executes Codex workflows.
-2. iOS CodexMonitor connects to the desktop daemon using `remoteBackendHost` + token.
-3. Transport is TCP only (`remoteBackendProvider = "tcp"`).
+2. iOS CodexMonitor connects to the desktop daemon using the host and token of the `remoteBackends` entry selected by `activeRemoteBackendId`.
+3. Transport is TCP only (each remote entry has `provider: "tcp"`).
 4. Tailscale is used as the network path between iOS and desktop.
 
 ## Prerequisites

@@ -375,6 +375,19 @@ pub(crate) struct RemoteBackendTarget {
     pub(crate) last_connected_at_ms: Option<i64>,
 }
 
+impl Default for RemoteBackendTarget {
+    fn default() -> Self {
+        Self {
+            id: "remote-default".to_string(),
+            name: "Primary remote".to_string(),
+            provider: RemoteBackendProvider::Tcp,
+            host: default_remote_backend_host(),
+            token: None,
+            last_connected_at_ms: None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct AppSettings {
     #[serde(default, rename = "codexBin")]
@@ -383,12 +396,6 @@ pub(crate) struct AppSettings {
     pub(crate) codex_args: Option<String>,
     #[serde(default, rename = "backendMode")]
     pub(crate) backend_mode: BackendMode,
-    #[serde(default, rename = "remoteBackendProvider")]
-    pub(crate) remote_backend_provider: RemoteBackendProvider,
-    #[serde(default = "default_remote_backend_host", rename = "remoteBackendHost")]
-    pub(crate) remote_backend_host: String,
-    #[serde(default, rename = "remoteBackendToken")]
-    pub(crate) remote_backend_token: Option<String>,
     #[serde(default = "default_remote_backends", rename = "remoteBackends")]
     pub(crate) remote_backends: Vec<RemoteBackendTarget>,
     #[serde(default, rename = "activeRemoteBackendId")]
@@ -549,17 +556,6 @@ pub(crate) struct AppSettings {
     )]
     pub(crate) subagent_system_notifications_enabled: bool,
     #[serde(
-        default = "default_collaboration_modes_enabled",
-        rename = "collaborationModesEnabled"
-    )]
-    pub(crate) collaboration_modes_enabled: bool,
-    #[serde(
-        default = "default_steer_enabled",
-        rename = "steerEnabled",
-        alias = "experimentalSteerEnabled"
-    )]
-    pub(crate) steer_enabled: bool,
-    #[serde(
         default = "default_follow_up_message_behavior",
         rename = "followUpMessageBehavior"
     )]
@@ -576,8 +572,7 @@ pub(crate) struct AppSettings {
     pub(crate) pause_queued_messages_when_response_required: bool,
     #[serde(
         default = "default_unified_exec_enabled",
-        rename = "unifiedExecEnabled",
-        alias = "experimentalUnifiedExecEnabled"
+        rename = "unifiedExecEnabled"
     )]
     pub(crate) unified_exec_enabled: bool,
     #[serde(
@@ -585,8 +580,6 @@ pub(crate) struct AppSettings {
         rename = "experimentalAppsEnabled"
     )]
     pub(crate) experimental_apps_enabled: bool,
-    #[serde(default = "default_personality", rename = "personality")]
-    pub(crate) personality: String,
     #[serde(default = "default_dictation_enabled", rename = "dictationEnabled")]
     pub(crate) dictation_enabled: bool,
     #[serde(default = "default_dictation_model_id", rename = "dictationModelId")]
@@ -696,7 +689,7 @@ fn default_remote_backend_host() -> String {
 }
 
 fn default_remote_backends() -> Vec<RemoteBackendTarget> {
-    Vec::new()
+    vec![RemoteBackendTarget::default()]
 }
 
 fn default_ui_scale() -> f64 {
@@ -916,14 +909,6 @@ Changes:\n{diff}"
         .to_string()
 }
 
-fn default_collaboration_modes_enabled() -> bool {
-    true
-}
-
-fn default_steer_enabled() -> bool {
-    true
-}
-
 fn default_follow_up_message_behavior() -> String {
     "queue".to_string()
 }
@@ -942,10 +927,6 @@ fn default_unified_exec_enabled() -> bool {
 
 fn default_experimental_apps_enabled() -> bool {
     false
-}
-
-fn default_personality() -> String {
-    "friendly".to_string()
 }
 
 fn default_dictation_enabled() -> bool {
@@ -1126,9 +1107,6 @@ impl Default for AppSettings {
             codex_bin: None,
             codex_args: None,
             backend_mode: default_backend_mode(),
-            remote_backend_provider: RemoteBackendProvider::Tcp,
-            remote_backend_host: default_remote_backend_host(),
-            remote_backend_token: None,
             remote_backends: default_remote_backends(),
             active_remote_backend_id: None,
             keep_daemon_running_after_app_close: false,
@@ -1171,15 +1149,12 @@ impl Default for AppSettings {
             git_diff_ignore_whitespace_changes: default_git_diff_ignore_whitespace_changes(),
             commit_message_prompt: default_commit_message_prompt(),
             commit_message_model_id: None,
-            collaboration_modes_enabled: true,
-            steer_enabled: true,
             follow_up_message_behavior: default_follow_up_message_behavior(),
             composer_follow_up_hint_enabled: default_composer_follow_up_hint_enabled(),
             pause_queued_messages_when_response_required:
                 default_pause_queued_messages_when_response_required(),
             unified_exec_enabled: true,
             experimental_apps_enabled: false,
-            personality: default_personality(),
             dictation_enabled: false,
             dictation_model_id: default_dictation_model_id(),
             dictation_preferred_language: None,
@@ -1206,7 +1181,7 @@ impl Default for AppSettings {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppSettings, BackendMode, RemoteBackendProvider, WorkspaceEntry, WorkspaceGroup,
+        AppSettings, BackendMode, WorkspaceEntry, WorkspaceGroup,
         WorkspaceKind, WorkspaceSettings,
     };
 
@@ -1223,13 +1198,9 @@ mod tests {
             (&settings.backend_mode, &expected_backend_mode),
             (BackendMode::Local, BackendMode::Local) | (BackendMode::Remote, BackendMode::Remote)
         ));
-        assert!(matches!(
-            settings.remote_backend_provider,
-            RemoteBackendProvider::Tcp
-        ));
-        assert_eq!(settings.remote_backend_host, "127.0.0.1:4732");
-        assert!(settings.remote_backend_token.is_none());
-        assert!(settings.remote_backends.is_empty());
+        assert_eq!(settings.remote_backends.len(), 1);
+        assert_eq!(settings.remote_backends[0].host, "127.0.0.1:4732");
+        assert!(settings.remote_backends[0].token.is_none());
         assert!(settings.active_remote_backend_id.is_none());
         assert!(!settings.keep_daemon_running_after_app_close);
         assert_eq!(settings.default_access_mode, "current");
@@ -1336,14 +1307,11 @@ mod tests {
         assert!(settings.preload_git_diffs);
         assert!(!settings.git_diff_ignore_whitespace_changes);
         assert!(settings.commit_message_prompt.contains("{diff}"));
-        assert!(settings.collaboration_modes_enabled);
-        assert!(settings.steer_enabled);
         assert_eq!(settings.follow_up_message_behavior, "queue");
         assert!(settings.composer_follow_up_hint_enabled);
         assert!(settings.pause_queued_messages_when_response_required);
         assert!(settings.unified_exec_enabled);
         assert!(!settings.experimental_apps_enabled);
-        assert_eq!(settings.personality, "friendly");
         assert!(!settings.dictation_enabled);
         assert_eq!(settings.dictation_model_id, "base");
         assert!(settings.dictation_preferred_language.is_none());

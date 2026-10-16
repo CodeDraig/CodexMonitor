@@ -1,4 +1,8 @@
-use super::*;
+use super::parse_string;
+use crate::DaemonState;
+use crate::DAEMON_NAME;
+use serde_json::json;
+use serde_json::Value;
 
 pub(super) async fn try_handle(
     state: &DaemonState,
@@ -56,5 +60,34 @@ pub(super) async fn try_handle(
             )
         }
         _ => None,
+    }
+}
+
+impl DaemonState {
+    pub(crate) fn daemon_info(&self) -> Value {
+        json!({
+            "name": DAEMON_NAME,
+            "version": env!("CARGO_PKG_VERSION"),
+            "pid": std::process::id(),
+            "mode": "tcp",
+            "binaryPath": self.daemon_binary_path,
+        })
+    }
+
+    pub(crate) async fn menu_set_accelerators(&self, _updates: Vec<Value>) -> Result<(), String> {
+        // Daemon has no native menu runtime; treat as no-op for remote parity.
+        Ok(())
+    }
+
+    pub(crate) async fn is_macos_debug_build(&self) -> bool {
+        cfg!(all(target_os = "macos", debug_assertions))
+    }
+
+    pub(crate) async fn send_notification_fallback(
+        &self,
+        title: String,
+        body: String,
+    ) -> Result<(), String> {
+        crate::shared::notifications_core::send_notification_fallback_core(title, body)
     }
 }

@@ -1,3 +1,4 @@
+use crate::shared::remote_settings::active_remote_backend;
 mod protocol;
 mod tcp_transport;
 mod transport;
@@ -233,14 +234,15 @@ async fn ensure_remote_backend(state: &AppState, app: AppHandle) -> Result<Remot
 fn resolve_transport_config(
     settings: &crate::types::AppSettings,
 ) -> Result<RemoteTransportConfig, String> {
-    let host = if settings.remote_backend_host.trim().is_empty() {
+    let remote = active_remote_backend(settings);
+    let host = if remote.host.trim().is_empty() {
         DEFAULT_REMOTE_HOST.to_string()
     } else {
-        settings.remote_backend_host.clone()
+        remote.host.clone()
     };
     Ok(RemoteTransportConfig::Tcp {
         host,
-        auth_token: settings.remote_backend_token.clone(),
+        auth_token: remote.token.clone(),
     })
 }
 
@@ -253,7 +255,7 @@ mod tests {
     #[test]
     fn resolve_tcp_transport_uses_remote_host() {
         let mut settings = AppSettings::default();
-        settings.remote_backend_host = "tcp.example:4732".to_string();
+        settings.remote_backends[0].host = "tcp.example:4732".to_string();
 
         let config = resolve_transport_config(&settings).expect("transport config");
         let RemoteTransportConfig::Tcp { host, .. } = config else {
