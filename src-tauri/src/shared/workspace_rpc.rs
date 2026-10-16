@@ -48,6 +48,8 @@ pub(crate) struct AddWorkspaceFromGitUrlRequest {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AddWorktreeRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) run_context: Option<crate::shared::runs_core::types::RunContext>,
     pub(crate) parent_id: String,
     pub(crate) branch: String,
     pub(crate) name: Option<String>,

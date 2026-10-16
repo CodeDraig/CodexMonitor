@@ -30,6 +30,7 @@ export function useWorktreeOps({
       parent: WorkspaceInfo,
       branch: string,
       options?: {
+        runContext?: import("@/features/runs/types").RunContext;
         activate?: boolean;
         displayName?: string | null;
         copyAgentsMd?: boolean;
@@ -59,6 +60,7 @@ export function useWorktreeOps({
           trimmed,
           trimmedName,
           copyAgentsMd,
+          ...(options?.runContext ? [options.runContext] : []),
         );
         setWorkspaces((prev) => [...prev, workspace]);
         if (options?.activate !== false) {

@@ -210,6 +210,8 @@ export type PersonalityPreference = "friendly" | "pragmatic";
 export type FollowUpMessageBehavior = "queue" | "steer";
 export type ComposerSendIntent = "default" | "queue" | "steer";
 export type SendMessageResult = {
+  turnId?: string;
+  runReceipt?: import("@/features/runs/types").RunLaunchReceipt;
   status: "sent" | "blocked" | "steer_failed";
 };
 

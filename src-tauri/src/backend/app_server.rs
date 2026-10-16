@@ -453,7 +453,9 @@ pub(crate) struct WorkspaceSession {
     pub(crate) thread_workspace: Mutex<HashMap<String, String>>,
     pub(crate) hidden_thread_ids: Mutex<HashSet<String>>,
     pub(crate) next_id: AtomicU64,
-    /// Callbacks for background threads - events for these threadIds are sent through the channel
+    /// Ordered run evidence queues; consumers perform storage and history work.
+    pub(crate) run_recorders: Mutex<HashMap<String, mpsc::UnboundedSender<Value>>>,
+    /// Callbacks for hidden background threads.
     pub(crate) background_thread_callbacks: Mutex<HashMap<String, mpsc::UnboundedSender<Value>>>,
     pub(crate) owner_workspace_id: String,
     pub(crate) workspace_ids: Mutex<HashSet<String>>,
@@ -805,6 +807,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
         thread_workspace: Mutex::new(HashMap::new()),
         hidden_thread_ids: Mutex::new(HashSet::new()),
         next_id: AtomicU64::new(1),
+        run_recorders: Mutex::new(HashMap::new()),
         background_thread_callbacks: Mutex::new(HashMap::new()),
         owner_workspace_id: entry.id.clone(),
         workspace_ids: Mutex::new(HashSet::from([entry.id.clone()])),
@@ -902,6 +905,14 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                         for thread_id in hidden_thread_ids {
                             hidden.insert(thread_id);
                         }
+                    }
+                }
+            }
+
+            if matches!(method_name, Some("turn/started" | "turn/completed" | "item/completed" | "thread/tokenUsage/updated" | "model/rerouted")) {
+                if let Some(ref tid) = thread_id {
+                    if let Some(recorder) = session_clone.run_recorders.lock().await.get(tid) {
+                        let _ = recorder.send(value.clone());
                     }
                 }
             }
@@ -1129,6 +1140,9 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
     };
     event_sink.emit_app_server_event(payload);
 
+    if let Some(path) = event_sink.run_store_path() {
+        crate::shared::runs_core::recording::restore(session.clone(), path);
+    }
     Ok(session)
 }
 

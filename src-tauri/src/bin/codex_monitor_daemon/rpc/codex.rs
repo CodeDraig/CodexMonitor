@@ -35,7 +35,7 @@ pub(super) async fn try_handle(
                 Ok(value) => value,
                 Err(err) => return Some(Err(err)),
             };
-            Some(state.start_thread(workspace_id).await)
+            Some(state.start_thread(workspace_id, match serde_json::from_value(params.get("runContext").cloned().unwrap_or(Value::Null)) { Ok(value) => value, Err(e) => return Some(Err(e.to_string())) }).await)
         }
         "resume_thread" => {
             let workspace_id = match parse_string(params, "workspaceId") {
@@ -180,6 +180,7 @@ pub(super) async fn try_handle(
             Some(
                 state
                     .send_user_message(
+                        match serde_json::from_value(params.get("runContext").cloned().unwrap_or(Value::Null)) { Ok(value) => value, Err(e) => return Some(Err(e.to_string())) },
                         workspace_id,
                         thread_id,
                         text,

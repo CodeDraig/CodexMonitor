@@ -50,6 +50,8 @@ type UseMainAppComposerWorkspaceStateArgs = {
   };
   settings: Pick<
     AppSettings,
+    | "backendMode"
+    | "remoteBackendHost"
     | "steerEnabled"
     | "followUpMessageBehavior"
     | "experimentalAppsEnabled"
@@ -248,6 +250,8 @@ export function useMainAppComposerWorkspaceState({
   });
 
   const workspaceHomeState = useWorkspaceHome({
+    backendKey: `${settings.backendMode}:${settings.remoteBackendHost}`,
+    visible: showWorkspaceHome,
     activeWorkspace,
     models: modelOptions,
     selectedModelId,

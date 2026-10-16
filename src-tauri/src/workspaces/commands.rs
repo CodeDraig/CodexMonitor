@@ -239,6 +239,7 @@ pub(crate) async fn add_clone(
 
 #[tauri::command]
 pub(crate) async fn add_worktree(
+    run_context: Option<crate::shared::runs_core::types::RunContext>,
     parent_id: String,
     branch: String,
     name: Option<String>,
@@ -249,6 +250,7 @@ pub(crate) async fn add_worktree(
     let copy_agents_md = copy_agents_md.unwrap_or(true);
     if remote_backend::is_remote_mode(&*state).await {
         let request = workspace_rpc::AddWorktreeRequest {
+            run_context,
             parent_id,
             branch,
             name,
@@ -274,6 +276,7 @@ pub(crate) async fn add_worktree(
         branch,
         name,
         copy_agents_md,
+        run_context,
         &data_dir,
         &state.workspaces,
         &state.sessions,

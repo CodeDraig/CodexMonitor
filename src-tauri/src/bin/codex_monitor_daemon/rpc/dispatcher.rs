@@ -6,6 +6,9 @@ pub(super) async fn dispatch_rpc_request(
     params: &Value,
     client_version: &str,
 ) -> Result<Value, String> {
+    if crate::shared::runs_rpc::METHODS.contains(&method) {
+        return crate::shared::runs_rpc::dispatch(method, params.get("input").cloned().unwrap_or(Value::Null), crate::shared::runs_core::db_path(&state.storage_path), &state.workspaces, &state.sessions).await;
+    }
     if let Some(result) = daemon::try_handle(state, method, params).await {
         return result;
     }

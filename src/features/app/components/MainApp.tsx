@@ -874,7 +874,7 @@ export default function MainApp() {
 
   const handleWorktreeCreated = useCallback(
     async (worktree: WorkspaceInfo, _parentWorkspace?: WorkspaceInfo) => {
-      await worktreeSetupScriptState.maybeRunWorktreeSetupScript(worktree);
+      return worktreeSetupScriptState.maybeRunWorktreeSetupScript(worktree);
     },
     [worktreeSetupScriptState],
   );
@@ -1118,6 +1118,8 @@ export default function MainApp() {
       userInputRequests,
     },
     settings: {
+      backendMode: appSettings.backendMode,
+      remoteBackendHost: appSettings.remoteBackendHost,
       steerEnabled: appSettings.steerEnabled,
       followUpMessageBehavior: appSettings.followUpMessageBehavior,
       experimentalAppsEnabled: appSettings.experimentalAppsEnabled,

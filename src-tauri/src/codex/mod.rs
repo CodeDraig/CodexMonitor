@@ -1,3 +1,4 @@
+use crate::shared::{runs_core::types::RunContext, runs_rpc};
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -73,6 +74,7 @@ pub(crate) async fn codex_update(
 
 #[tauri::command]
 pub(crate) async fn start_thread(
+    run_context: Option<RunContext>,
     workspace_id: String,
     state: State<'_, AppState>,
     app: AppHandle,
@@ -82,12 +84,12 @@ pub(crate) async fn start_thread(
             &*state,
             app,
             "start_thread",
-            json!({ "workspaceId": workspace_id }),
+            json!({ "workspaceId": workspace_id, "runContext": run_context }),
         )
         .await;
     }
 
-    codex_core::start_thread_core(&state.sessions, &state.workspaces, workspace_id).await
+    codex_core::start_thread_core(runs_rpc::tracking(&state.storage_path, run_context), &state.sessions, &state.workspaces, workspace_id).await
 }
 
 #[tauri::command]
@@ -337,6 +339,7 @@ pub(crate) async fn set_thread_name(
 
 #[tauri::command]
 pub(crate) async fn send_user_message(
+    run_context: Option<RunContext>,
     workspace_id: String,
     thread_id: String,
     text: String,
@@ -361,6 +364,7 @@ pub(crate) async fn send_user_message(
         payload.insert("workspaceId".to_string(), json!(workspace_id));
         payload.insert("threadId".to_string(), json!(thread_id));
         payload.insert("text".to_string(), json!(text));
+        payload.insert("runContext".to_string(), json!(run_context));
         payload.insert("model".to_string(), json!(model));
         payload.insert("effort".to_string(), json!(effort));
         insert_optional_nullable_string(&mut payload, "serviceTier", service_tier);
@@ -382,6 +386,7 @@ pub(crate) async fn send_user_message(
     }
 
     codex_core::send_user_message_core(
+        runs_rpc::tracking(&state.storage_path, run_context),
         &state.sessions,
         &state.workspaces,
         workspace_id,

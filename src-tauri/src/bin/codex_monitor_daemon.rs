@@ -1,3 +1,4 @@
+use crate::shared::{runs_core::types::RunContext, runs_rpc};
 #[allow(dead_code)]
 #[path = "../backend/mod.rs"]
 mod backend;
@@ -116,6 +117,7 @@ fn spawn_with_client(
 
 #[derive(Clone)]
 struct DaemonEventSink {
+    run_store_path: PathBuf,
     tx: broadcast::Sender<DaemonEvent>,
 }
 
@@ -129,6 +131,7 @@ enum DaemonEvent {
 }
 
 impl EventSink for DaemonEventSink {
+    fn run_store_path(&self) -> Option<PathBuf> { Some(self.run_store_path.clone()) }
     fn emit_app_server_event(&self, event: AppServerEvent) {
         let _ = self.tx.send(DaemonEvent::AppServer(event));
     }
@@ -289,6 +292,7 @@ impl DaemonState {
         branch: String,
         name: Option<String>,
         copy_agents_md: bool,
+        run_context: Option<RunContext>,
         client_version: String,
     ) -> Result<WorkspaceInfo, String> {
         let client_version = client_version.clone();
@@ -297,6 +301,7 @@ impl DaemonState {
             branch,
             name,
             copy_agents_md,
+            run_context,
             &self.data_dir,
             &self.workspaces,
             &self.sessions,
@@ -660,8 +665,8 @@ impl DaemonState {
         files_core::file_write_core(&self.workspaces, scope, kind, workspace_id, content).await
     }
 
-    async fn start_thread(&self, workspace_id: String) -> Result<Value, String> {
-        codex_core::start_thread_core(&self.sessions, &self.workspaces, workspace_id).await
+    async fn start_thread(&self, workspace_id: String, run_context: Option<RunContext>) -> Result<Value, String> {
+        codex_core::start_thread_core(runs_rpc::tracking(&self.storage_path, run_context), &self.sessions, &self.workspaces, workspace_id).await
     }
 
     async fn resume_thread(
@@ -785,6 +790,7 @@ impl DaemonState {
 
     async fn send_user_message(
         &self,
+        run_context: Option<RunContext>,
         workspace_id: String,
         thread_id: String,
         text: String,
@@ -797,6 +803,7 @@ impl DaemonState {
         collaboration_mode: Option<Value>,
     ) -> Result<Value, String> {
         codex_core::send_user_message_core(
+            runs_rpc::tracking(&self.storage_path, run_context),
             &self.sessions,
             &self.workspaces,
             workspace_id,
@@ -1592,7 +1599,7 @@ mod tests {
             storage_path: data_dir.join("workspaces.json"),
             settings_path: data_dir.join("settings.json"),
             app_settings: Mutex::new(AppSettings::default()),
-            event_sink: DaemonEventSink { tx },
+            event_sink: DaemonEventSink { tx, run_store_path: data_dir.join("runs.sqlite3") },
             codex_login_cancels: Mutex::new(HashMap::new()),
             daemon_binary_path: Some("/tmp/codex-monitor-daemon".to_string()),
         }
@@ -1658,11 +1665,37 @@ mod tests {
             thread_workspace: Mutex::new(HashMap::new()),
             hidden_thread_ids: Mutex::new(HashSet::new()),
             next_id: AtomicU64::new(0),
+            run_recorders: Mutex::new(HashMap::new()),
             background_thread_callbacks: Mutex::new(HashMap::new()),
             workspace_ids: Mutex::new(HashSet::from([owner_workspace_id.clone()])),
             workspace_roots: Mutex::new(HashMap::new()),
             owner_workspace_id,
         })
+    }
+
+    #[test]
+    fn rpc_run_store_matches_shared_contract_and_isolates_backend_identity() {
+        run_async_test(async {
+            let dir = make_temp_dir("rpc-runs");
+            let state = test_state(&dir);
+            insert_workspace(&state,"run-workspace",dir.to_str().unwrap()).await;
+            let input = json!({"requestId":uuid::Uuid::new_v4().to_string(),"workspaceId":"run-workspace","mode":"local","title":"Durable","prompt":"Initial","images":["data:image/png;base64,AAH/"],"instances":[{"model":"fixture"},{"model":"other","serviceTier":null}]});
+            let run = rpc::handle_rpc_request(&state,"create_run",json!({"input":input.clone()}),"test".into()).await.unwrap();
+            let retry = rpc::handle_rpc_request(&state,"create_run",json!({"input":input}),"test".into()).await.unwrap();
+            assert_eq!(run,retry);
+            let page = rpc::handle_rpc_request(&state,"list_runs",json!({"input":{"workspaceId":"run-workspace"}}),"test".into()).await.unwrap();
+            assert_eq!(page["runs"][0],run); assert_eq!(page["storeId"],run["storeId"]);
+            let instance = &run["instances"][1]["id"];
+            let setup = rpc::handle_rpc_request(&state,"record_run_setup",json!({"input":{"instanceId":instance,"observation":{"status":"dispatched"}}}),"test".into()).await.unwrap();
+            assert_eq!(setup["setup"]["status"],"dispatched");
+            assert!(rpc::handle_rpc_request(&state,"record_run_setup",json!({"input":{"instanceId":instance,"observation":{"status":"succeeded"}}}),"test".into()).await.is_err());
+            state.workspaces.lock().await.clear();
+            let retained = rpc::handle_rpc_request(&state,"get_run",json!({"input":{"runId":run["id"]}}),"test".into()).await.unwrap();
+            assert_eq!(retained["prompt"],"Initial");
+            let other=test_state(&make_temp_dir("rpc-other-runs"));
+            let page=rpc::handle_rpc_request(&other,"list_runs",json!({"input":{}}),"test".into()).await.unwrap();
+            assert_ne!(page["storeId"],run["storeId"]); assert_eq!(page["runs"],json!([]));
+        });
     }
 
     #[test]
@@ -1989,6 +2022,7 @@ fn main() {
     runtime.block_on(async move {
         let (events_tx, _events_rx) = broadcast::channel::<DaemonEvent>(2048);
         let event_sink = DaemonEventSink {
+            run_store_path: config.data_dir.join("runs.sqlite3"),
             tx: events_tx.clone(),
         };
         let state = Arc::new(DaemonState::load(&config, event_sink));

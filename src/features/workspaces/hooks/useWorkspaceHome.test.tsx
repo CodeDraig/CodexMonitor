@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelOption, WorkspaceInfo } from "../../../types";
-import { generateRunMetadata } from "../../../services/tauri";
+import { createRun, getRun, listRuns, recordRunFailure, recordRunSetup, reconcileRun, updateRunMetadata, generateRunMetadata } from "../../../services/tauri";
 import { useWorkspaceHome } from "./useWorkspaceHome";
 
 vi.mock("../../../services/tauri", () => ({
   generateRunMetadata: vi.fn(),
+  createRun: vi.fn(), getRun: vi.fn(), listRuns: vi.fn(), recordRunFailure: vi.fn(), recordRunSetup: vi.fn(), reconcileRun: vi.fn(), updateRunMetadata: vi.fn(),
 }));
 
 const workspace: WorkspaceInfo = {
@@ -44,6 +45,31 @@ const models: ModelOption[] = [
     isDefault: false,
   },
 ];
+
+let savedRuns: import("@/features/runs/types").RunRecord[];
+beforeEach(() => {
+  vi.clearAllMocks(); savedRuns = [];
+  vi.mocked(listRuns).mockImplementation(async () => ({storeId: "store", runs: structuredClone(savedRuns), nextCursor: null}));
+  vi.mocked(createRun).mockImplementation(async input => {
+    const run: import("@/features/runs/types").RunRecord = { ...input, schemaVersion: 1, id: input.requestId, storeId: "store", workspaceName: "Project", workspacePath: workspace.path, createdAt: Date.now(), revision: 0, baseOid: "a", baseline: {available: true, files: [], errors: []}, attachments: [],
+      instances: input.instances.map((requested, ordinal) => ({id: `instance-${ordinal}`, runId: input.requestId, ordinal, requested, preparation: "planned", workspaceId: workspace.id, workspacePath: workspace.path, threadId: null, initialTurnId: null, submissionOutcome: "not_submitted", executionOutcome: "not_started", submission: null, baseline: null, setup: {status: "not_configured"}, error: null, captures: []})),
+    };
+    savedRuns.push(run); return structuredClone(run);
+  });
+  vi.mocked(getRun).mockImplementation(async runId => {
+    const run = savedRuns.find(r => r.id === runId)!;
+    const next = run.instances.find(i => i.submissionOutcome === "not_submitted");
+    if (next) {next.submissionOutcome = "accepted"; next.preparation = "submitted"; next.initialTurnId = "turn-1"; next.executionOutcome = "running";}
+    return structuredClone(run);
+  });
+  vi.mocked(recordRunFailure).mockImplementation(async (id, message) => {
+    const instance = savedRuns.flatMap(r => r.instances).find(i => i.id === id)!;
+    instance.error = message; instance.preparation = "failed"; instance.submissionOutcome = "rejected";
+  });
+  vi.mocked(recordRunSetup).mockResolvedValue(undefined);
+  vi.mocked(reconcileRun).mockImplementation(async id => ({run: structuredClone(savedRuns.find(r => r.id === id)!), errors: []}));
+  vi.mocked(updateRunMetadata).mockImplementation(async (id, _revision, title) => {const run = savedRuns.find(r => r.id === id)!; run.title = title; run.revision += 1; return structuredClone(run);});
+});
 
 describe("useWorkspaceHome", () => {
   it("uses provider model name for worktree runs", async () => {

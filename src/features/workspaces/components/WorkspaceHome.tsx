@@ -1,3 +1,4 @@
+import { RunWorkbench } from "@/features/runs/components/RunWorkbench";
 import {
   useEffect,
   useMemo,
@@ -470,6 +471,7 @@ export function WorkspaceHome({
         />
       </div>
 
+      <RunWorkbench key={runs[0]?.record?.storeId ?? workspace.id} runs={runs.flatMap(run => run.record ? [run.record] : [])} onSelectInstance={onSelectInstance} />
       <WorkspaceHomeHistory
         runs={runs}
         recentThreadInstances={recentThreadInstances}

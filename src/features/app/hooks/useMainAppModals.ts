@@ -66,7 +66,7 @@ type UseMainAppModalsArgs = {
       settings: Partial<WorkspaceSettings>,
     ) => Promise<WorkspaceInfo>;
     selectWorkspace: (workspaceId: string) => void;
-    handleWorktreeCreated: (worktree: WorkspaceInfo, parent: WorkspaceInfo) => Promise<void>;
+    handleWorktreeCreated: (worktree: WorkspaceInfo, parent: WorkspaceInfo) => Promise<unknown>;
     resolveCloneProjectContext: (
       workspace: WorkspaceInfo,
     ) => { groupId: string | null; copiesFolder: string | null };
@@ -429,7 +429,7 @@ export function useMainAppModals({
     updateWorkspaceSettings: workspacePrompts.updateWorkspaceSettings,
     connectWorkspace: workspacePrompts.connectWorkspace,
     onSelectWorkspace: workspacePrompts.selectWorkspace,
-    onWorktreeCreated: workspacePrompts.handleWorktreeCreated,
+    onWorktreeCreated: async (worktree, parent) => { await workspacePrompts.handleWorktreeCreated(worktree, parent); },
     onCompactActivate: workspacePrompts.onCompactActivate,
     onError: (message) => workspacePrompts.onWorkspacePromptError(message, "worktree"),
   });

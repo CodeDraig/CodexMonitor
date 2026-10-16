@@ -1,3 +1,4 @@
+import type { RunContext } from "@/features/runs/types";
 import type { ApprovalDecision } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -297,8 +298,9 @@ export async function addWorktree(
   branch: string,
   name: string | null,
   copyAgentsMd = true,
+  runContext?: RunContext,
 ): Promise<WorkspaceInfo> {
-  return invoke<WorkspaceInfo>("add_worktree", { parentId, branch, name, copyAgentsMd });
+  return invoke<WorkspaceInfo>("add_worktree", { parentId, branch, name, copyAgentsMd, ...(runContext ? {runContext} : {}) });
 }
 
 export type WorktreeSetupStatus = {
@@ -388,8 +390,8 @@ export async function setWorkspaceRuntimeCodexArgs(
   });
 }
 
-export async function startThread(workspaceId: string) {
-  return invoke<any>("start_thread", { workspaceId });
+export async function startThread(workspaceId: string, runContext?: RunContext) {
+  return invoke<any>("start_thread", { workspaceId, ...(runContext ? {runContext} : {}) });
 }
 
 export async function forkThread(workspaceId: string, threadId: string) {
@@ -451,6 +453,7 @@ export async function sendUserMessage(
   threadId: string,
   text: string,
   options?: {
+    runContext?: RunContext;
     model?: string | null;
     effort?: string | null;
     serviceTier?: "fast" | "flex" | null | undefined;
@@ -470,6 +473,7 @@ export async function sendUserMessage(
     accessMode: options?.accessMode ?? null,
     images,
   };
+  if (options?.runContext) payload.runContext = options.runContext;
   if (options?.serviceTier !== undefined) {
     payload.serviceTier = options.serviceTier;
   }
@@ -1195,3 +1199,22 @@ export async function sendNotification(
 
   await attemptFallback();
 }
+
+// Run records belong to the executing backend. Never read its SQLite file from the UI.
+export async function createRun(input: import("@/features/runs/types").CreateRunInput) {
+  return invoke<import("@/features/runs/types").RunRecord>("create_run", { input: { ...input, images: await normalizeImagesForRpc(input.images) } });
+}
+export function listRuns(workspaceId?: string, cursor?: string, limit = 50) {
+  return invoke<import("@/features/runs/types").RunPage>("list_runs", {input: {workspaceId, cursor, limit}});
+}
+export function getRun(runId: string) { return invoke<import("@/features/runs/types").RunRecord>("get_run", {input: {runId}}); }
+export function updateRunMetadata(runId: string, expectedRevision: number, title: string) { return invoke<import("@/features/runs/types").RunRecord>("update_run_metadata", {input: {runId, expectedRevision, title}}); }
+export function recordRunSetup(instanceId: string, observation: import("@/features/runs/types").SetupObservation) { return invoke("record_run_setup", {input: {instanceId, observation}}); }
+export function recordRunFailure(instanceId: string, message: string) { return invoke("record_run_failure", {input: {instanceId, message}}); }
+export function reconcileRun(runId: string) { return invoke<{run: import("@/features/runs/types").RunRecord; errors: string[]}>("reconcile_run", {input: {runId}}); }
+export function captureRunInstance(instanceId: string, turnId: string, requestId: string, label: string) { return invoke<import("@/features/runs/types").RunCapture>("capture_run_instance", {input: {instanceId, turnId, requestId, label}}); }
+export function getRunCapture(captureId: string) { return invoke<import("@/features/runs/types").RunCapture>("get_run_capture", {input: {captureId}}); }
+export function saveRunComparison(input: {leftCaptureId: string; rightCaptureId: string; choice: import("@/features/runs/types").RunComparison["choice"]; notes: string; expectedRevision: number}) { return invoke<import("@/features/runs/types").RunComparison>("save_run_comparison", {input}); }
+export function listRunComparisons(input: {runId?: string; captureId?: string}) { return invoke<import("@/features/runs/types").RunComparison[]>("list_run_comparisons", {input}); }
+
+export function listRunTurns(instanceId: string) { return invoke<{id: string; status: string}[]>("list_run_turns", {input: {instanceId}}); }

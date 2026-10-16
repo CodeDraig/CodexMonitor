@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::backend::events::{AppServerEvent, EventSink, TerminalExit, TerminalOutput};
 
@@ -14,6 +14,9 @@ impl TauriEventSink {
 }
 
 impl EventSink for TauriEventSink {
+    fn run_store_path(&self) -> Option<std::path::PathBuf> {
+        self.app.path().app_data_dir().ok().map(|dir| dir.join("runs.sqlite3"))
+    }
     fn emit_app_server_event(&self, event: AppServerEvent) {
         let _ = self.app.emit("app-server-event", event);
     }

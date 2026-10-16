@@ -54,6 +54,7 @@ function WorkspaceHomeInstanceList({
             className={`workspace-home-instance ${status.stateClass}${isActive ? " is-active" : ""}`}
             key={instance.id}
             type="button"
+            disabled={!instance.workspaceId || !instance.threadId}
             onClick={() => onSelectInstance(instance.workspaceId, instance.threadId)}
           >
             <span className="workspace-home-instance-title">{label}</span>
@@ -62,7 +63,7 @@ function WorkspaceHomeInstanceList({
                 status.isRunning ? " is-running" : ""
               }`}
             >
-              {status.statusLabel}
+              {instance.durableStatus ?? status.statusLabel}
             </span>
           </button>
         );
@@ -105,6 +106,7 @@ export function WorkspaceHomeHistory({
                         {run.instances.length === 1 ? "" : "s"}
                         {run.status === "failed" && " · Failed"}
                         {run.status === "partial" && " · Partial"}
+                        {run.status === "unknown" && " · Needs reconciliation"}
                       </div>
                     </div>
                     <div className="workspace-home-run-time">

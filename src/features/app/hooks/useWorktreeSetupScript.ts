@@ -21,7 +21,7 @@ type UseWorktreeSetupScriptOptions = {
 };
 
 export type WorktreeSetupScriptState = {
-  maybeRunWorktreeSetupScript: (worktree: WorkspaceInfo) => Promise<void>;
+  maybeRunWorktreeSetupScript: (worktree: WorkspaceInfo) => Promise<import("@/features/runs/types").SetupObservation>;
 };
 
 export function useWorktreeSetupScript({
@@ -33,19 +33,19 @@ export function useWorktreeSetupScript({
   const runningRef = useRef<Set<string>>(new Set());
 
   const maybeRunWorktreeSetupScript = useCallback(
-    async (worktree: WorkspaceInfo) => {
+    async (worktree: WorkspaceInfo): Promise<import("@/features/runs/types").SetupObservation> => {
       if ((worktree.kind ?? "main") !== "worktree") {
-        return;
+        return {status: "not_configured"};
       }
       if (runningRef.current.has(worktree.id)) {
-        return;
+        return {status: "already_dispatched"};
       }
       runningRef.current.add(worktree.id);
       try {
         const status = await getWorktreeSetupStatus(worktree.id);
         const script = status.script?.trim() ? status.script : null;
         if (!status.shouldRun || !script) {
-          return;
+          return {status: script ? "already_dispatched" : "not_configured"};
         }
 
         openTerminal();
@@ -69,8 +69,10 @@ export function useWorktreeSetupScript({
         );
         await writeTerminalSession(worktree.id, terminalId, `${script}\n`);
         await markWorktreeSetupRan(worktree.id);
+        return {status: "dispatched"};
       } catch (error) {
         onDebug?.(buildErrorDebugEntry("worktree setup script error", error));
+        return {status: "dispatch_failed", message: String(error)};
       } finally {
         runningRef.current.delete(worktree.id);
       }

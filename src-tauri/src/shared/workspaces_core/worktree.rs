@@ -1,3 +1,5 @@
+use crate::shared::runs_core::{self, store::with_store, types::{RunContext, OperationDisposition}};
+use serde_json::json;
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
@@ -90,6 +92,7 @@ pub(crate) async fn add_worktree_core<
     branch: String,
     name: Option<String>,
     copy_agents_md: bool,
+    run_context: Option<RunContext>,
     data_dir: &PathBuf,
     workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
@@ -134,6 +137,23 @@ where
         return Err("Cannot create a worktree from another worktree.".to_string());
     }
 
+    let tracking = if let Some(context) = run_context {
+        let path = runs_core::db_path(storage_path);
+        let ctx = context.clone(); let parent = parent_id.clone(); let branch_input = branch.clone(); let name_input = name.clone();
+        let operation = with_store(path.clone(), move |store| {
+            store.validate_context(&ctx)?;
+            let run = store.get_run(&ctx.run_id)?;
+            if run.workspace_id != parent || run.mode != "worktree" { return Err("Run does not match worktree parent".into()); }
+            let disposition = store.begin_operation(&ctx,"worktree",json!({"parentId":parent,"branch":branch_input,"name":name_input,"copyAgentsMd":copy_agents_md}))?;
+            Ok((disposition, run.base_oid.ok_or("Run has no base commit")?))
+        }).await?;
+        match operation.0 {
+            OperationDisposition::Completed { receipt } => return serde_json::from_value(receipt).map_err(|e|e.to_string()),
+            OperationDisposition::Unresolved { .. } => return Err("Worktree creation is unresolved; inspect its reserved path before creating a new run".into()),
+            OperationDisposition::Execute { id } => Some((path,context,id,operation.1)),
+        }
+    } else { None };
+
     // Determine worktree root: per-workspace setting > global setting > default
     let worktree_root = if let Some(custom_folder) = &parent_entry.settings.worktrees_folder {
         PathBuf::from(workspace_path_to_string(&PathBuf::from(custom_folder)))
@@ -158,8 +178,17 @@ where
     let stored_worktree_path = workspace_path_to_string(&worktree_path);
 
     let repo_path = PathBuf::from(&parent_entry.path);
+    let workspace_id = Uuid::new_v4().to_string();
     let branch_exists = git_branch_exists(&repo_path, &branch).await?;
-    if branch_exists {
+    if let Some((path,context,_,base)) = &tracking {
+        let instance_id=context.instance_id.clone(); let reserved_id=workspace_id.clone(); let reserved_path=stored_worktree_path.clone(); let reserved_branch=branch.clone();
+        with_store(path.clone(),move |store| store.update_instance(&instance_id,|i| {
+            i.workspace_id=Some(reserved_id); i.workspace_path=Some(reserved_path); i.preparation="creating_worktree".into();
+            i.baseline=json!({"reservedBranch":reserved_branch}); Ok(())
+        })).await?;
+        if branch_exists { return Err("Recorded worktree branch already exists; refusing to adopt it".into()); }
+        run_git_command(&repo_path,&["worktree","add","-b",&branch,&worktree_path_string,base]).await?;
+    } else if branch_exists {
         run_git_command(
             &repo_path,
             &["worktree", "add", &worktree_path_string, &branch],
@@ -206,7 +235,7 @@ where
     }
 
     let entry = WorkspaceEntry {
-        id: Uuid::new_v4().to_string(),
+        id: workspace_id,
         name: name.clone().unwrap_or_else(|| branch.clone()),
         path: stored_worktree_path,
         kind: WorkspaceKind::Worktree,
@@ -248,7 +277,7 @@ where
         .await;
     sessions.lock().await.insert(entry.id.clone(), session);
 
-    Ok(WorkspaceInfo {
+    let info = WorkspaceInfo {
         id: entry.id,
         name: entry.name,
         path: entry.path,
@@ -257,7 +286,12 @@ where
         parent_id: entry.parent_id,
         worktree: entry.worktree,
         settings: entry.settings,
-    })
+    };
+    if let Some((path,_,operation_id,_))=tracking {
+        let receipt=serde_json::to_value(&info).map_err(|e|e.to_string())?;
+        with_store(path,move |store|store.finish_operation(&operation_id,receipt,|i|{i.preparation="workspace_created".into();Ok(())})).await?;
+    }
+    Ok(info)
 }
 
 pub(crate) async fn remove_worktree_core<FRunGit, FutRunGit, FIsMissing, FRemoveDirAll>(

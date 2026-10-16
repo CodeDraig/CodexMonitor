@@ -10,6 +10,7 @@ import { clampThreadName } from "@threads/utils/threadNaming";
 import { formatRelativeTime } from "@utils/time";
 
 export type SendMessageOptions = {
+  runContext?: import("@/features/runs/types").RunContext;
   skipPromptExpansion?: boolean;
   model?: string | null;
   effort?: string | null;

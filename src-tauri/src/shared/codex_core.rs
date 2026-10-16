@@ -1,4 +1,4 @@
-mod history;
+pub(crate) mod history;
 
 pub(crate) async fn set_feature_flag_core(
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
@@ -270,6 +270,7 @@ async fn resolve_workspace_path_core(
 }
 
 pub(crate) async fn start_thread_core(
+    tracking: Option<crate::shared::runs_core::recording::Tracking>,
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
     workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
     workspace_id: String,
@@ -280,9 +281,7 @@ pub(crate) async fn start_thread_core(
         "cwd": workspace_path,
         "approvalPolicy": "on-request"
     });
-    session
-        .send_request_for_workspace(&workspace_id, "thread/start", params)
-        .await
+    crate::shared::runs_core::recording::tracked_request(&session, &workspace_id, "thread/start", params, tracking).await
 }
 
 pub(crate) async fn resume_thread_core(
@@ -295,9 +294,7 @@ pub(crate) async fn resume_thread_core(
         &workspace_id, "thread/resume", json!({ "threadId": thread_id, "excludeTurns": true }),
     ).await?;
     history::rpc_result(&response)?;
-    let turns = history::load_turns(&thread_id, |params| {
-        session.send_request_for_workspace(&workspace_id, "thread/turns/list", params)
-    }).await?;
+    let turns = history::load_session_turns(&session, &workspace_id, &thread_id).await?;
     let thread = response.get_mut("result").and_then(|result| result.get_mut("thread"))
         .and_then(Value::as_object_mut).ok_or("Codex resume response is missing its thread")?;
     thread.insert("turns".to_string(), Value::Array(turns));
@@ -518,6 +515,7 @@ pub(crate) fn insert_optional_nullable_string(
 }
 
 pub(crate) async fn send_user_message_core(
+    tracking: Option<crate::shared::runs_core::recording::Tracking>,
     sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>,
     workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
     workspace_id: String,
@@ -566,9 +564,7 @@ pub(crate) async fn send_user_message_core(
             params.insert("collaborationMode".to_string(), mode);
         }
     }
-    session
-        .send_request_for_workspace(&workspace_id, "turn/start", Value::Object(params))
-        .await
+    crate::shared::runs_core::recording::tracked_request(&session, &workspace_id, "turn/start", Value::Object(params), tracking).await
 }
 
 pub(crate) async fn turn_steer_core(

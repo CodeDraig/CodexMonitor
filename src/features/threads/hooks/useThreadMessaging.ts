@@ -252,7 +252,7 @@ export function useThreadMessaging({
             workspace.id,
             threadId,
             finalText,
-            buildTurnStartPayload({
+            { ...buildTurnStartPayload({
               model: resolvedModel,
               effort: resolvedEffort,
               serviceTier: resolvedServiceTier,
@@ -260,9 +260,10 @@ export function useThreadMessaging({
               accessMode: resolvedAccessMode,
               images,
               appMentions,
-            }),
+            }), ...(options?.runContext ? {runContext: options.runContext} : {}) },
           )) as Record<string, unknown>;
 
+        const runReceipt = options?.runContext ? response.runReceipt as SendMessageResult["runReceipt"] : undefined;
         const rpcError = extractRpcErrorMessage(response);
 
         onDebug?.({
@@ -278,7 +279,7 @@ export function useThreadMessaging({
             setActiveTurnId(threadId, null);
             pushThreadErrorMessage(threadId, `Turn failed to start: ${rpcError}`);
             safeMessageActivity();
-            return { status: "blocked" };
+            return { status: "blocked", ...(runReceipt ? {runReceipt} : {}) };
           }
           if (isStaleSteerTurnError(rpcError)) {
             markProcessing(threadId, false);
@@ -309,10 +310,10 @@ export function useThreadMessaging({
           setActiveTurnId(threadId, null);
           pushThreadErrorMessage(threadId, "Turn failed to start.");
           safeMessageActivity();
-          return { status: "blocked" };
+          return { status: "blocked", ...(runReceipt ? {runReceipt} : {}) };
         }
         setActiveTurnId(threadId, turnId);
-        return { status: "sent" };
+        return { status: "sent", turnId, ...(runReceipt ? {runReceipt} : {}) };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (requestMode !== "steer") {
