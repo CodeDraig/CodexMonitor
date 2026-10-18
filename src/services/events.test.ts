@@ -24,8 +24,8 @@ describe("events subscriptions", () => {
     const unlisten = vi.fn();
 
     vi.mocked(listen).mockImplementation((_event, handler) => {
-      listener = handler as EventCallback<AppServerEvent>;
-      return Promise.resolve(unlisten);
+      if(_event==="app-server-event")listener = handler as EventCallback<AppServerEvent>;
+      return Promise.resolve(_event==="app-server-event"?unlisten:vi.fn());
     });
 
     const onEvent = vi.fn();
@@ -126,4 +126,15 @@ describe("events subscriptions", () => {
 
     cleanup();
   });
+});
+
+it("forwards committed runtime-owned Codex events once and excludes ACP and replay",async()=>{
+ const handlers=new Map<string,(event:{payload:unknown})=>void>();
+ vi.mocked(listen).mockImplementation((name,handler)=>{handlers.set(String(name),handler as (event:{payload:unknown})=>void);return Promise.resolve(vi.fn());});
+ const onEvent=vi.fn();const stop=subscribeAppServerEvents(onEvent);
+ const event={runtime:{kind:"codex"},source:"live",workspaceId:"w",raw:{method:"item/completed",params:{threadId:"native"}}};
+ handlers.get("runtime-event")!({payload:event});
+ handlers.get("runtime-event")!({payload:{...event,source:"history"}});
+ handlers.get("runtime-event")!({payload:{...event,runtime:{kind:"acp"}}});
+ expect(onEvent).toHaveBeenCalledTimes(1);expect(onEvent).toHaveBeenCalledWith({workspace_id:"w",message:event.raw});stop();await Promise.resolve();
 });

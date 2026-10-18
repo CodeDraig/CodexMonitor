@@ -1,3 +1,4 @@
+import {acpRef} from "@/features/runtime/conversationIdentity";
 import type { ThreadSummary } from "@/types";
 import type { ThreadAction, ThreadState } from "../useThreadsReducer";
 import { prefersUpdatedSort } from "./common";
@@ -22,6 +23,7 @@ export function reduceThreadLifecycle(
     case "setActiveThreadId":
       return {
         ...state,
+        activeConversationRefByWorkspace:{...state.activeConversationRefByWorkspace,[action.workspaceId]:action.threadId?(acpRef(action.threadId)??{kind:"codex",threadId:action.threadId}):null},
         activeThreadIdByWorkspace: {
           ...state.activeThreadIdByWorkspace,
           [action.workspaceId]: action.threadId,

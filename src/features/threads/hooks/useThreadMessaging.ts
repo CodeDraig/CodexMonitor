@@ -1,3 +1,4 @@
+import {isAcpConversation} from "@/features/runtime/conversationIdentity";
 import { useCallback } from "react";
 import type { Dispatch, MutableRefObject } from "react";
 import * as Sentry from "@sentry/react";
@@ -137,6 +138,7 @@ export function useThreadMessaging({
       images: string[] = [],
       options?: SendMessageOptions,
     ): Promise<SendMessageResult> => {
+      if(isAcpConversation(threadId))return {status:"blocked"};
       const messageText = text.trim();
       if (!messageText && images.length === 0) {
         return { status: "blocked" };
@@ -426,7 +428,7 @@ export function useThreadMessaging({
   );
 
   const interruptTurn = useCallback(async () => {
-    if (!activeWorkspace || !activeThreadId) {
+    if (!activeWorkspace || !activeThreadId || isAcpConversation(activeThreadId)) {
       return;
     }
     const activeTurnId = activeTurnIdByThread[activeThreadId] ?? null;

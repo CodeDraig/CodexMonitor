@@ -1,5 +1,8 @@
+import { RuntimePanel } from "@/features/runtime/components/RuntimePanel";
+import type { RuntimeProfile } from "@/features/runtime/types";
 import { RunWorkbench } from "@/features/runs/components/RunWorkbench";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -37,6 +40,9 @@ import { useWorkspaceHomeSuggestionsStyle } from "../hooks/useWorkspaceHomeSugge
 import type { ThreadStatusById } from "../../../utils/threadStatus";
 
 type WorkspaceHomeProps = {
+  runtimeBackendKey?: string;
+  requestedRuntimeSessionId?: string | null;
+  onRuntimeSelectionChange?: (profiles: RuntimeProfile[]) => void;
   workspace: WorkspaceInfo;
   showGitInitBanner: boolean;
   initGitRepoLoading: boolean;
@@ -100,6 +106,7 @@ type WorkspaceHomeProps = {
 };
 
 export function WorkspaceHome({
+  runtimeBackendKey = "local", onRuntimeSelectionChange, requestedRuntimeSessionId,
   workspace,
   showGitInitBanner,
   initGitRepoLoading,
@@ -161,6 +168,13 @@ export function WorkspaceHome({
   onAgentMdRefresh,
   onAgentMdSave,
 }: WorkspaceHomeProps) {
+  const [selectedRuntimes, setSelectedRuntimes] = useState<RuntimeProfile[]>([]);
+  const openRuntimeSession = useCallback((sessionId: string) => {
+    window.dispatchEvent(new CustomEvent("runtime-open-conversation", {detail: {backendKey: runtimeBackendKey, sessionId}}));
+  }, [runtimeBackendKey]);
+  useEffect(() => {setSelectedRuntimes([]);}, [runtimeBackendKey, workspace.id]);
+  useEffect(() => {if(requestedRuntimeSessionId)openRuntimeSession(requestedRuntimeSessionId);}, [requestedRuntimeSessionId, openRuntimeSession]);
+  const acpRun = selectedRuntimes.length > 0 && selectedRuntimes.every(p=>p.kind !== "codex");
   const [showIcon, setShowIcon] = useState(true);
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const iconPath = useMemo(() => buildIconPath(workspace.path), [workspace.path]);
@@ -372,10 +386,12 @@ export function WorkspaceHome({
         />
       )}
 
+      <RuntimePanel key={`${runtimeBackendKey}:${workspace.id}`} workspaceId={workspace.id} backendKey={runtimeBackendKey} onRunSelection={profiles=>{setSelectedRuntimes(profiles);onRuntimeSelectionChange?.(profiles);}} />
       <div className="workspace-home-composer">
         <div className="composer">
           <ComposerInput
             text={prompt}
+            placeholder={selectedRuntimes.length ? `Ask ${selectedRuntimes.map(p=>p.name).join(", ")} to do something...` : undefined}
             disabled={isSubmitting}
             sendLabel="Send"
             canStop={false}
@@ -418,7 +434,7 @@ export function WorkspaceHome({
         {error && <div className="workspace-home-error">{error}</div>}
       </div>
 
-      <WorkspaceHomeRunControls
+      {acpRun ? <label>Run mode<select aria-label="Runtime run mode" value={runMode} disabled={isSubmitting} onChange={e=>onRunModeChange(e.target.value as WorkspaceRunMode)}><option value="local">Local</option>{workspace.kind !== "worktree" && <option value="worktree">Worktree</option>}</select></label> : <WorkspaceHomeRunControls
         workspaceKind={workspace.kind}
         runMode={runMode}
         onRunModeChange={onRunModeChange}
@@ -436,7 +452,7 @@ export function WorkspaceHome({
         onSelectEffort={onSelectEffort}
         reasoningSupported={reasoningSupported}
         isSubmitting={isSubmitting}
-      />
+      />}
 
       <div className="workspace-home-agent">
         {agentMdTruncated && (
@@ -471,7 +487,7 @@ export function WorkspaceHome({
         />
       </div>
 
-      <RunWorkbench key={runs[0]?.record?.storeId ?? workspace.id} runs={runs.flatMap(run => run.record ? [run.record] : [])} onSelectInstance={onSelectInstance} />
+      <RunWorkbench key={runs[0]?.record?.storeId ?? workspace.id} runs={runs.flatMap(run => run.record ? [run.record] : [])} onSelectInstance={onSelectInstance} onSelectRuntimeSession={openRuntimeSession} />
       <WorkspaceHomeHistory
         runs={runs}
         recentThreadInstances={recentThreadInstances}
@@ -480,6 +496,7 @@ export function WorkspaceHome({
         activeThreadId={activeThreadId}
         threadStatusById={threadStatusById}
         onSelectInstance={onSelectInstance}
+        onSelectRuntimeSession={openRuntimeSession}
       />
     </div>
   );

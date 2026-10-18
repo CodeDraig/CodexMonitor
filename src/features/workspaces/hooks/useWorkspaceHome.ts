@@ -1,3 +1,4 @@
+import type { RuntimeProfile, RuntimeSession } from "@/features/runtime/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ModelOption,
@@ -5,7 +6,7 @@ import type {
   ServiceTier,
   WorkspaceInfo,
 } from "../../../types";
-import { generateRunMetadata, createRun, recordRunFailure, recordRunSetup, getRun, updateRunMetadata } from "@services/tauri";
+import { generateRunMetadata, runtimeRequest, buildRuntimePrompt, createRun, recordRunFailure, recordRunSetup, getRun, updateRunMetadata } from "@services/tauri";
 import type { RunContext, RunRecord, SetupObservation } from "@/features/runs/types";
 import { useRunRecords } from "@/features/runs/hooks/useRunRecords";
 
@@ -15,6 +16,7 @@ export type WorkspaceHomeRunInstance = {
   id: string;
   workspaceId: string;
   threadId: string;
+  sessionId?: string;
   modelId: string | null;
   modelLabel: string;
   sequence: number;
@@ -211,6 +213,9 @@ export function useWorkspaceHome({
     submittingByWorkspace: {},
   });
 
+  const [openedRuntimeSessionId, setOpenedRuntimeSessionId] = useState<string | null>(null);
+  const [runtimeSelection, setRuntimeSelection] = useState<RuntimeProfile[]>([]);
+  useEffect(() => { setRuntimeSelection([]); setOpenedRuntimeSessionId(null); }, [backendKey, activeWorkspace?.id]);
   const launching = useRef(false);
   const pendingCreation = useRef<{key: string; id: string} | null>(null);
   const activeWorkspaceId = activeWorkspace?.id ?? null;
@@ -362,9 +367,15 @@ export function useWorkspaceHome({
     const selectedModels = Object.entries(modelSelections)
       .filter(([modelId, count]) => count > 0 && modelLookup.has(modelId))
       .flatMap(([modelId, count]) => Array.from({length: count}, () => ({modelId, model: modelLookup.get(modelId) ?? null})));
-    const selections = runMode === "local"
+    const codexSelections = runMode === "local"
       ? [{modelId: selectedModelId, model: selectedModelId ? modelLookup.get(selectedModelId) ?? null : null}]
       : selectedModels;
+    const selections = runtimeSelection.length
+      ? runtimeSelection.flatMap(runtime => runtime.kind === "codex"
+        ? (codexSelections.length ? codexSelections : [{modelId: selectedModelId, model: null}]).map(s => ({...s, runtime}))
+        : [{modelId: null, model: null, runtime}])
+      : codexSelections.map(s => ({...s, runtime: null}));
+    if (runMode === "local" && selections.length > 1) { setWorkspaceError("Select one agent for a local run, or use worktrees for multiple agents."); return false; }
     if (!selections.length) { setWorkspaceError("Select at least one model to run in a worktree."); return false; }
     launching.current = true;
     setSubmitting(true);
@@ -374,7 +385,10 @@ export function useWorkspaceHome({
     if (pendingCreation.current?.key !== creationKey) pendingCreation.current = {key: creationKey, id: crypto.randomUUID()};
     try {
       record = await createRun({requestId: pendingCreation.current.id, workspaceId: activeWorkspaceId, title: buildRunTitle(prompt), prompt, mode: runMode, images,
-        instances: selections.map(selection => ({modelId: selection.modelId, model: selection.model?.model ?? null, modelLabel: resolveModelLabel(selection.model, "Default model"), effort, serviceTier, collaborationMode})),
+        instances: selections.map(selection => ({
+          ...(selection.runtime && selection.runtime.kind !== "codex" ? {modelLabel: "Agent default"} : {modelId: selection.modelId, model: selection.model?.model ?? null, modelLabel: resolveModelLabel(selection.model, "Default model"), effort, serviceTier, collaborationMode}),
+          ...(selection.runtime ? {runtime: {profileId: selection.runtime.id, profileRevision: selection.runtime.revision, kind: selection.runtime.kind}, runtimeProfileId: selection.runtime.id, runtimeName: selection.runtime.name} : {}),
+        })),
       });
     } catch (error) {
       setWorkspaceError(`Run recording failed; no instances launched: ${String(error)}`);
@@ -394,8 +408,10 @@ export function useWorkspaceHome({
         await records.refresh();
       } catch { /* Metadata is optional; durable launch identity already exists. */ }
     };
-    if (runMode === "worktree") await metadataTask();
-    else void metadataTask();
+    if (selections.every(s => !s.runtime)) {
+      if (runMode === "worktree") await metadataTask();
+      else void metadataTask();
+    }
     try {
       for (const [ordinal, selection] of selections.entries()) {
         const instance = record.instances[ordinal];
@@ -407,12 +423,20 @@ export function useWorkspaceHome({
             if (!created) throw new Error("Failed to create worktree; inspect its durable receipt before retrying.");
             workspace = created;
           }
-          if (!workspace.connected) await connectWorkspace(workspace);
+          if (!selection.runtime && !workspace.connected) await connectWorkspace(workspace);
           if (runMode === "worktree") {
             let observation: SetupObservation = {status: "not_configured"};
             try { observation = await onWorktreeCreated?.(workspace, activeWorkspace) ?? observation; }
             catch (error) { observation = {status: "dispatch_failed", message: String(error)}; }
             await recordRunSetup(instance.id, observation);
+          }
+          if (selection.runtime) {
+            const session = await runtimeRequest<RuntimeSession>("create_session", {workspaceId: workspace.id, profileId: selection.runtime.id, expectedProfileRevision: selection.runtime.revision});
+            setOpenedRuntimeSessionId(session.sessionId);
+            const content = await buildRuntimePrompt(prompt, images, selection.runtime.kind);
+            const options = selection.runtime.kind === "codex" ? {model: selection.model?.model ?? null, effort, ...(serviceTier !== undefined ? {serviceTier} : {}), ...(collaborationMode ? {collaborationMode} : {})} : {};
+            await runtimeRequest("submit", {requestId: crypto.randomUUID(), sessionId: session.sessionId, prompt: content, options, runContext});
+            continue;
           }
           const threadId = await startThreadForWorkspace(workspace.id, {activate: false, runContext});
           if (!threadId) throw new Error("Thread creation did not return a receipt; reconcile this instance.");
@@ -440,10 +464,11 @@ export function useWorkspaceHome({
     }
     return true;
   }, [activeWorkspace, activeWorkspaceId, backendKey, isSubmitting, draft, modelSelections, modelLookup, runMode, selectedModelId,
-    effort, serviceTier, collaborationMode, setSubmitting, setWorkspaceError, records.refresh, addWorktreeAgent,
+    effort, serviceTier, collaborationMode, runtimeSelection, setSubmitting, setWorkspaceError, records.refresh, addWorktreeAgent,
     connectWorkspace, onWorktreeCreated, startThreadForWorkspace, seedThreadCodexParams, sendUserMessageToThread]);
 
   return {
+    runtimeSelection, setRuntimeSelection, openedRuntimeSessionId,
     runs,
     draft,
     runMode,
@@ -465,7 +490,7 @@ export function toWorkspaceHomeRun(record: RunRecord): WorkspaceHomeRun {
   const pending = record.instances.some(i => i.preparation !== "failed" && ["not_submitted", "submitting"].includes(i.submissionOutcome));
   return {record, id: record.id, workspaceId: record.workspaceId, title: record.title, prompt: record.prompt, createdAt: record.createdAt, mode: record.mode,
     status: pending ? "pending" : accepted === record.instances.length ? "ready" : accepted ? "partial" : uncertain ? "unknown" : "failed", error: null, instanceErrors: errors,
-    instances: record.instances.map(i => ({id: i.id, workspaceId: i.workspaceId ?? "", threadId: i.threadId ?? "", modelId: i.requested.modelId ?? null, modelLabel: i.requested.modelLabel ?? "Default model", sequence: i.ordinal + 1,
+    instances: record.instances.map(i => ({id: i.id, workspaceId: i.workspaceId ?? "", threadId: i.threadId ?? "", sessionId: i.sessionId, modelId: i.requested.modelId ?? null, modelLabel: i.requested.runtimeName ? `${i.requested.runtimeName} · ${i.requested.modelLabel ?? "Agent default"}` : i.requested.modelLabel ?? "Default model", sequence: i.ordinal + 1,
       durableStatus: `${i.preparation} · ${i.submissionOutcome} · ${i.executionOutcome}`})),
   };
 }

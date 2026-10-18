@@ -26,6 +26,7 @@ pub(crate) struct TerminalExit {
 
 pub(crate) trait EventSink: Clone + Send + Sync + 'static {
     fn run_store_path(&self) -> Option<std::path::PathBuf> { None }
+    fn emit_runtime_event(&self, _event: Value) {}
     fn emit_app_server_event(&self, event: AppServerEvent);
     fn emit_terminal_output(&self, event: TerminalOutput);
     fn emit_terminal_exit(&self, event: TerminalExit);

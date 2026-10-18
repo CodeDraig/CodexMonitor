@@ -1,6 +1,6 @@
 # Run records and comparison
 
-Workspace Home records new local and worktree runs on the executing backend. A run has a persistent identity and one instance for every planned model selection, including instances that fail before creating a thread. Ordinary threads are not imported into run groups.
+Workspace Home records new local and worktree runs on the executing backend. A run has a persistent identity and one instance for every planned agent/model selection, including instances that fail before creating a thread. Ordinary threads are not imported into run groups.
 
 ## Capture and compare
 
@@ -12,9 +12,9 @@ Workspace Home records new local and worktree runs on the executing backend. A r
 
 The initial submitted turn is the primary result. Captures never change after creation. Recovery and manual captures have separate identities, so later conversations cannot silently change a saved comparison.
 
-“Accepted” requires a turn ID or a correlated event on the registered initial thread. A transport failure or malformed reply remains unknown. Reconciliation reads history; it never launches another thread or turn. If a creation operation has an unresolved receipt, inspect the reserved workspace/thread information before starting a new run.
+For Codex, “accepted” requires a turn ID or a correlated event on the registered initial thread. ACP runs use a durable Monitor execution ID and correlated updates or a prompt result. See [agent runtimes](agent-runtimes.md) for runtime selection, capability handling, and execution-scoped captures. A transport failure or malformed reply remains unknown. Reconciliation reads history; it never launches another thread or turn. If a creation operation has an unresolved receipt, inspect the reserved workspace/thread information before starting a new run.
 
-Setup status describes terminal dispatch, not process exit. Command evidence comes from app-server command items, including exit codes when supplied. Assistant text claiming that checks passed does not become command evidence. Token usage is unavailable when no turn-attributable observation was received; thread totals are not substituted.
+Setup status describes terminal dispatch, not process exit. Command evidence comes from app-server command items or ACP tool updates, including exit codes when supplied. Assistant text claiming that checks passed does not become command evidence. Token usage is unavailable when no attributable observation was received. Execution and session observations retain explicit scopes; session totals are not substituted for execution totals.
 
 ## Git evidence
 
@@ -28,7 +28,7 @@ Snapshots are observations, not atomic filesystem snapshots. They retain observa
 
 The executing backend stores `runs.sqlite3` alongside `workspaces.json`. Local execution uses the app data directory; remote execution uses the daemon data directory. App and daemon share `src-tauri/src/shared/runs_core/` and `runs_rpc.rs`.
 
-SQLite uses write-ahead logging (WAL), `synchronous=FULL`, and a five-second busy timeout. App and daemon may share one store on the same host and local filesystem. Existing stores switch to WAL without changing their schema version or identity. Opening an initialized store for a read does not acquire a writer transaction. Transactions protect run creation, operation reservations and receipts, captures, and comparison revisions across processes. Each recorded event and its instance transition commit together. Attachments remain blobs in the same database. Frontend state is isolated by backend and store identity. Unsupported schemas and database errors surface as errors.
+SQLite uses write-ahead logging (WAL), `synchronous=FULL`, and a five-second busy timeout. App and daemon may share one store on the same host and local filesystem. Existing stores retain their identity when switching to WAL. The additive runtime/conversation migrations upgrade schema 1 or 2 to schema 3 after a consistent SQLite backup; original record and evidence payloads remain unchanged. Successful ACP conversation replays publish separate history generations and never replace immutable initial run captures. Opening an initialized store for a read does not acquire a writer transaction. Transactions protect run creation, operation reservations and receipts, captures, and comparison revisions across processes. The Codex recorder commits each recorded event and its instance transition together. Runtime execution and run-instance status updates are transactional; primary captures commit before the session is released for a follow-up. Attachments remain blobs in the same database. Frontend state is isolated by backend and store identity. Unsupported schemas and database errors surface as errors.
 
 The recorder retains a queued event across SQLite `BUSY` failures, retries in order after a short delay, and keeps the app-server reader free to deliver responses. Accepted responses and capture persistence also retry busy failures without repeating external submissions. Only SQLite busy errors retry; validation, I/O errors, and stale revisions remain errors. User-initiated comparison writes keep their `expectedRevision` contract: a busy failure is explicit, and a stale revision cannot overwrite a newer edit. The workbench retains an unsaved draft on save failure.
 

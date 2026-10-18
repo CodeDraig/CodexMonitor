@@ -51,6 +51,16 @@ pub(super) async fn take_live_shared_session(
     }
 }
 
+pub(super) async fn take_compatible_session(
+    sessions: &Mutex<HashMap<String, Arc<WorkspaceSession>>>, identity: &serde_json::Value,
+) -> Option<Arc<WorkspaceSession>> {
+    let candidates: Vec<_> = sessions.lock().await.values().cloned().collect();
+    for candidate in candidates {
+        if candidate.launch_identity.as_ref().is_none_or(|key|key == identity) && session_process_is_alive(&candidate).await {return Some(candidate);}
+    }
+    None
+}
+
 pub(crate) async fn connect_workspace_core<F, Fut>(
     workspace_id: String,
     workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
@@ -63,17 +73,26 @@ where
     Fut: Future<Output = Result<Arc<WorkspaceSession>, String>>,
 {
     let (entry, parent_entry) = resolve_entry_and_parent(workspaces, &workspace_id).await?;
+    let (default_bin, codex_args) = {
+        let settings = app_settings.lock().await;
+        (settings.codex_bin.clone(), resolve_workspace_codex_args(&entry, parent_entry.as_ref(), Some(&settings)))
+    };
+    let codex_home = resolve_workspace_codex_home(&entry, parent_entry.as_ref());
+    let launch_identity = serde_json::json!({"executable":default_bin.as_deref().unwrap_or("codex"),"args":codex_args,"home":codex_home});
     let _spawn_guard = workspace_session_spawn_lock().lock().await;
     if let Some(existing_for_entry) = {
         let sessions = sessions.lock().await;
         sessions.get(&entry.id).cloned()
     } {
-        if session_process_is_alive(&existing_for_entry).await {
+        if session_process_is_alive(&existing_for_entry).await && existing_for_entry.launch_identity.as_ref().is_none_or(|identity|identity == &launch_identity) {
             return Ok(());
         }
-        remove_session_references(sessions, &existing_for_entry).await;
+        if session_process_is_alive(&existing_for_entry).await {
+            return Err("runtime_busy: workspace is connected with a different Codex launch configuration; disconnect before changing it".into());
+        } else {remove_session_references(sessions, &existing_for_entry).await;}
     }
-    if let Some(existing_session) = take_live_shared_session(sessions).await {
+    let compatible = take_compatible_session(sessions, &launch_identity).await;
+    if let Some(existing_session) = compatible {
         existing_session
             .register_workspace_with_path(&entry.id, Some(&entry.path))
             .await;
@@ -83,19 +102,11 @@ where
             .insert(entry.id.clone(), existing_session);
         return Ok(());
     }
-    let (default_bin, codex_args) = {
-        let settings = app_settings.lock().await;
-        (
-            settings.codex_bin.clone(),
-            resolve_workspace_codex_args(&entry, parent_entry.as_ref(), Some(&settings)),
-        )
-    };
-    let codex_home = resolve_workspace_codex_home(&entry, parent_entry.as_ref());
     let session = spawn_session(entry.clone(), default_bin, codex_args, codex_home).await?;
     session
         .register_workspace_with_path(&entry.id, Some(&entry.path))
         .await;
-    sessions.lock().await.insert(entry.id, session);
+    sessions.lock().await.insert(entry.id.clone(), session);
     Ok(())
 }
 
@@ -194,6 +205,9 @@ mod tests {
             thread_workspace: Mutex::new(HashMap::new()),
             hidden_thread_ids: Mutex::new(HashSet::new()),
             next_id: AtomicU64::new(0),
+            launch_identity: None,
+            initialization: Default::default(),
+            runtime_subscribers: Default::default(),
             run_recorders: Mutex::new(HashMap::new()),
             background_thread_callbacks: Mutex::new(HashMap::new()),
             owner_workspace_id: "test-owner".to_string(),

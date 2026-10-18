@@ -1,4 +1,5 @@
 export type WorkspaceSettings = {
+  codexAutoConnect?: boolean;
   sidebarCollapsed: boolean;
   sortOrder?: number | null;
   groupId?: string | null;
@@ -104,6 +105,7 @@ export type ConversationItem =
       role: "user" | "assistant";
       text: string;
       images?: string[];
+      acpContent?: {sessionId:string;blocks:Record<string,unknown>[]} ;
     }
   | {
       id: string;
@@ -116,7 +118,7 @@ export type ConversationItem =
         answers: string[];
       }[];
     }
-  | { id: string; kind: "reasoning"; summary: string; content: string }
+  | { id: string; kind: "reasoning"; summary: string; content: string; acpContent?: {sessionId:string;blocks:Record<string,unknown>[]} }
   | { id: string; kind: "diff"; title: string; diff: string; status?: string }
   | { id: string; kind: "review"; state: "started" | "completed"; text: string }
   | {
@@ -129,6 +131,7 @@ export type ConversationItem =
       id: string;
       kind: "tool";
       toolType: string;
+      acpContent?: {sessionId:string;blocks:Record<string,unknown>[]};
       title: string;
       detail: string;
       status?: string;
@@ -142,6 +145,8 @@ export type ConversationItem =
     };
 
 export type ThreadSummary = {
+  conversationRef?: import("@/features/runtime/types").ConversationRef;
+  agentLabel?: string;
   id: string;
   name: string;
   updatedAt: number;

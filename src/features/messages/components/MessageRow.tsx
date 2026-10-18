@@ -1,3 +1,4 @@
+import {AcpContent} from "@/features/runtime/components/AcpContent";
 import { memo, useMemo, useState } from "react";
 import Check from "lucide-react/dist/esm/icons/check";
 import Copy from "lucide-react/dist/esm/icons/copy";
@@ -80,6 +81,7 @@ export const MessageRow = memo(function MessageRow({
             onOpenThreadLink={onOpenThreadLink}
           />
         )}
+        {item.acpContent && <AcpContent {...item.acpContent}/>}
         {lightboxIndex !== null && imageItems.length > 0 && (
           <ImageLightbox
             images={imageItems}

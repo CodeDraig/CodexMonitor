@@ -319,6 +319,7 @@ pub(crate) fn restore(session: Arc<WorkspaceSession>, path: PathBuf) {
             }
         };
         for instance in instances {
+            if instance.session_id.is_some() { continue; }
             // A fresh server cannot correlate a future event with an unanswered old
             // request. A later follow-up must never become the primary result.
             if instance.initial_turn_id.is_none()

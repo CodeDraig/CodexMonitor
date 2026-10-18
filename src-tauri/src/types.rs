@@ -313,6 +313,8 @@ pub(crate) struct WorkspaceGroup {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub(crate) struct WorkspaceSettings {
+    #[serde(default, rename = "codexAutoConnect", skip_serializing_if = "Option::is_none")]
+    pub(crate) codex_auto_connect: Option<bool>,
     #[serde(default, rename = "sidebarCollapsed")]
     pub(crate) sidebar_collapsed: bool,
     #[serde(default, rename = "sortOrder")]

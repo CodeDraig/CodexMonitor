@@ -62,6 +62,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
     client_version: String,
     event_sink: E,
 ) -> Result<Arc<WorkspaceSession>, String> {
+    let launch_identity = Some(json!({"executable":default_codex_bin.as_deref().unwrap_or("codex"),"args":codex_args,"home":codex_home}));
     let codex_bin = default_codex_bin;
     let _ = check_codex_installation(codex_bin.clone()).await?;
 
@@ -85,6 +86,8 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
 
     let session = Arc::new(WorkspaceSession {
         codex_args,
+        launch_identity,
+        initialization: Default::default(),
         child: Mutex::new(child),
         stdin: Mutex::new(stdin),
         activity: Mutex::new(Default::default()),
@@ -93,6 +96,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
         thread_workspace: Mutex::new(HashMap::new()),
         hidden_thread_ids: Mutex::new(HashSet::new()),
         next_id: AtomicU64::new(1),
+        runtime_subscribers: Default::default(),
         run_recorders: Mutex::new(HashMap::new()),
         background_thread_callbacks: Mutex::new(HashMap::new()),
         owner_workspace_id: entry.id.clone(),
@@ -146,11 +150,16 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
             );
         }
     };
-    if let Err(error) = init_response.and_then(|response| validate_initialize_response(&response)) {
+    let checked = init_response.and_then(|response| {
+        validate_initialize_response(&response)?;
+        Ok(response)
+    });
+    if let Err(error) = &checked {
         let mut child = session.child.lock().await;
         kill_child_process_tree(&mut child).await;
-        return Err(error);
+        return Err(error.clone());
     }
+    *session.initialization.lock().await = checked?["result"].clone();
     session.send_notification("initialized", None).await?;
 
     let payload = AppServerEvent {

@@ -81,6 +81,12 @@ pub(crate) struct RunInstance {
     pub workspace_path: Option<String>,
     pub thread_id: Option<String>,
     pub initial_turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<crate::shared::agent_runtime::types::RuntimeRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_execution_id: Option<String>,
     pub submission_outcome: SubmissionOutcome,
     pub execution_outcome: ExecutionOutcome,
     pub submission: Option<Value>,
@@ -96,6 +102,8 @@ pub(crate) struct CaptureSummary {
     pub id: String,
     pub kind: CaptureKind,
     pub turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub label: String,
     pub created_at: i64,
     pub complete: bool,
@@ -109,6 +117,8 @@ pub(crate) struct RunCapture {
     pub request_id: String,
     pub kind: CaptureKind,
     pub turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub label: String,
     pub created_at: i64,
     pub status: ExecutionOutcome,

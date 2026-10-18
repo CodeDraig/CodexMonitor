@@ -25,6 +25,7 @@ mod prompts;
 mod remote_backend;
 mod rules;
 mod runs;
+mod runtime;
 mod settings;
 mod shared;
 mod state;
@@ -181,6 +182,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            runtime::runtime_request,
             runs::create_run,
             runs::list_runs,
             runs::get_run,

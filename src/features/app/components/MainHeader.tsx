@@ -20,6 +20,7 @@ import type { WorkspaceLaunchScriptsState } from "../hooks/useWorkspaceLaunchScr
 import { useMenuController } from "../hooks/useMenuController";
 
 type MainHeaderProps = {
+  conversationAgentLabel?: string;
   workspace: WorkspaceInfo;
   parentName?: string | null;
   worktreeLabel?: string | null;
@@ -73,6 +74,7 @@ type MainHeaderProps = {
 };
 
 export function MainHeader({
+  conversationAgentLabel,
   workspace,
   parentName = null,
   worktreeLabel = null,
@@ -191,6 +193,7 @@ export function MainHeader({
           <span className="workspace-title">
             {parentName ? parentName : workspace.name}
           </span>
+          {conversationAgentLabel&&<span className="workspace-branch-static-button">{conversationAgentLabel}</span>}
           <span className="workspace-separator" aria-hidden>
             ›
           </span>

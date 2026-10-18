@@ -47,6 +47,9 @@ import { isMacPlatform } from "../../../utils/platformPaths";
 import type { CodexArgsOption } from "../../threads/utils/codexArgsProfiles";
 
 type ComposerProps = {
+  runtimeMode?: boolean;
+  runtimeLabel?: string;
+  runtimeCommands?: {name:string;description?:string}[];
   onSend: (
     text: string,
     images: string[],
@@ -161,6 +164,9 @@ const DEFAULT_EDITOR_SETTINGS: ComposerEditorSettings = {
 };
 
 export const Composer = memo(function Composer({
+  runtimeMode = false,
+  runtimeLabel,
+  runtimeCommands,
   onSend,
   onStop,
   canStop,
@@ -318,6 +324,8 @@ export const Composer = memo(function Composer({
     selectionStart,
     disabled,
     appsEnabled,
+    runtimeMode,
+    runtimeCommands,
     skills,
     apps,
     prompts,
@@ -628,6 +636,7 @@ export const Composer = memo(function Composer({
         </div>
       ) : null}
       <ComposerInput
+        placeholder={runtimeMode?`Message ${runtimeLabel??"agent"}`:undefined}
         text={text}
         disabled={disabled}
         sendLabel={effectiveSendLabel}
@@ -682,7 +691,7 @@ export const Composer = memo(function Composer({
         onReviewPromptUpdateCustomInstructions={onReviewPromptUpdateCustomInstructions}
         onReviewPromptConfirmCustom={onReviewPromptConfirmCustom}
       />
-      <ComposerMetaBar
+      {!runtimeMode && <ComposerMetaBar
         disabled={disabled}
         collaborationModes={collaborationModes}
         selectedCollaborationModeId={selectedCollaborationModeId}
@@ -701,7 +710,7 @@ export const Composer = memo(function Composer({
         accessMode={accessMode}
         onSelectAccessMode={onSelectAccessMode}
         contextUsage={contextUsage}
-      />
+      />}
     </footer>
   );
 });

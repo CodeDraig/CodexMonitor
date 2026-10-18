@@ -8,7 +8,7 @@ import type {
   WorkspaceInfo,
 } from "../../../types";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import type { MouseEvent, RefObject } from "react";
+import type { MouseEvent, RefObject, ReactNode } from "react";
 import { FolderOpen } from "lucide-react";
 import { SidebarBottomRail } from "./SidebarBottomRail";
 import { SidebarHeader } from "./SidebarHeader";
@@ -97,6 +97,7 @@ function groupFlatThreadRowsByTimeBucket(
 }
 
 type SidebarProps = {
+  agentSessionBrowserNode?: ReactNode;
   workspaces: WorkspaceInfo[];
   groupedWorkspaces: WorkspaceGroupSection[];
   hasWorkspaceGroups: boolean;
@@ -158,6 +159,7 @@ type SidebarProps = {
 };
 
 export const Sidebar = memo(function Sidebar({
+  agentSessionBrowserNode,
   workspaces,
   groupedWorkspaces,
   hasWorkspaceGroups,
@@ -873,6 +875,7 @@ export const Sidebar = memo(function Sidebar({
       onDrop={onWorkspaceDrop}
     >
       <div className="sidebar-drag-strip" />
+      {agentSessionBrowserNode}
       <SidebarHeader
         onSelectHome={onSelectHome}
         onAddWorkspace={onAddWorkspace}

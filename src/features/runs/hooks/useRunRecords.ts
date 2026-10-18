@@ -24,7 +24,7 @@ export function useRunRecords(workspaceId: string | null, backendKey: string, vi
       if (version !== generation.current) return;
       setState({key, storeId: page.storeId, runs: records, error: null, loading: false});
       // Restore event subscriptions after a backend restart; never relaunch.
-      const recover = records.filter(run => run.instances.some(i => i.threadId && (i.executionOutcome === "running" || i.executionOutcome === "unknown" || (i.initialTurnId && !i.captures.length))));
+      const recover = records.filter(run => run.instances.some(i => (i.threadId || i.sessionId) && (i.executionOutcome === "running" || i.executionOutcome === "unknown" || ((i.initialTurnId || i.initialExecutionId) && !i.captures.length))));
       for (const run of recover) {
         const result = await reconcileRun(run.id);
         if (version !== generation.current) return;

@@ -134,6 +134,18 @@ pub(crate) async fn dispatch(
         };
         let mut errors = vec![];
         for instance in records {
+            if let Some(session_id)=instance.session_id.clone() {
+                with_store(path.clone(),move|store|store.reconcile_runtime_owner(&session_id)).await?;
+                if let Some(execution)=instance.initial_execution_id.clone() {
+                    if !instance.captures.iter().any(|c|c.execution_id.as_deref()==Some(&execution)) {
+                        let ticket=with_store(path.clone(),move|s|s.runtime_execution(&execution)).await?;
+                        if matches!(ticket.execution, ExecutionOutcome::Completed|ExecutionOutcome::Failed|ExecutionOutcome::Interrupted) {
+                            super::agent_runtime::registry::capture_execution(path.clone(),instance.id.clone(),ticket.execution_id,format!("initial:{}",instance.id),"Initial execution".into(),CaptureKind::InitialTurn).await?;
+                        }
+                    }
+                }
+                continue;
+            }
             let tracking = Tracking {
                 path: path.clone(),
                 context: RunContext {

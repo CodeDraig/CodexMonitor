@@ -17,6 +17,7 @@ type WorkspaceHomeHistoryProps = {
   activeThreadId: string | null;
   threadStatusById: ThreadStatusById;
   onSelectInstance: (workspaceId: string, threadId: string) => void;
+  onSelectRuntimeSession?: (sessionId: string) => void;
 };
 
 type WorkspaceHomeInstanceListProps = {
@@ -25,6 +26,7 @@ type WorkspaceHomeInstanceListProps = {
   activeThreadId: string | null;
   threadStatusById: ThreadStatusById;
   onSelectInstance: (workspaceId: string, threadId: string) => void;
+  onSelectRuntimeSession?: (sessionId: string) => void;
 };
 
 function WorkspaceHomeInstanceList({
@@ -32,7 +34,7 @@ function WorkspaceHomeInstanceList({
   activeWorkspaceId,
   activeThreadId,
   threadStatusById,
-  onSelectInstance,
+  onSelectInstance, onSelectRuntimeSession,
 }: WorkspaceHomeInstanceListProps) {
   const labelCounts = buildLabelCounts(instances);
 
@@ -54,8 +56,8 @@ function WorkspaceHomeInstanceList({
             className={`workspace-home-instance ${status.stateClass}${isActive ? " is-active" : ""}`}
             key={instance.id}
             type="button"
-            disabled={!instance.workspaceId || !instance.threadId}
-            onClick={() => onSelectInstance(instance.workspaceId, instance.threadId)}
+            disabled={!instance.workspaceId || (!instance.threadId && !instance.sessionId)}
+            onClick={() => instance.sessionId ? onSelectRuntimeSession?.(instance.sessionId) : onSelectInstance(instance.workspaceId, instance.threadId)}
           >
             <span className="workspace-home-instance-title">{label}</span>
             <span
@@ -79,7 +81,7 @@ export function WorkspaceHomeHistory({
   activeWorkspaceId,
   activeThreadId,
   threadStatusById,
-  onSelectInstance,
+  onSelectInstance, onSelectRuntimeSession,
 }: WorkspaceHomeHistoryProps) {
   return (
     <>
@@ -135,6 +137,7 @@ export function WorkspaceHomeHistory({
                       activeThreadId={activeThreadId}
                       threadStatusById={threadStatusById}
                       onSelectInstance={onSelectInstance}
+                      onSelectRuntimeSession={onSelectRuntimeSession}
                     />
                   ) : run.status === "failed" ? (
                     <div className="workspace-home-empty">

@@ -1,3 +1,4 @@
+import {AcpContent} from "@/features/runtime/components/AcpContent";
 import { memo, useEffect, useState } from "react";
 import { usePlanExport } from "../hooks/usePlanExport";
 import type { ConversationItem } from "@/types";
@@ -98,6 +99,8 @@ export const ToolRow = memo(function ToolRow({
         aria-label="Toggle tool details"
       />
       <div className="tool-inline-content">
+        {isExpanded&&item.acpContent&&<AcpContent {...item.acpContent}/>}
+
         <button
           type="button"
           className="tool-inline-summary tool-inline-toggle"

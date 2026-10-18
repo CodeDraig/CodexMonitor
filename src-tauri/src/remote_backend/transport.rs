@@ -132,6 +132,7 @@ pub(crate) async fn dispatch_incoming_line(
             }
         }
         IncomingMessage::Notification { method, params } => match method.as_str() {
+            "runtime-event" => { let _ = app.emit("runtime-event", params); }
             "app-server-event" => {
                 let _ = app.emit("app-server-event", params);
             }

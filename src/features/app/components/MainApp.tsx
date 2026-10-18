@@ -1,3 +1,6 @@
+import "@/styles/agent-conversations.css";
+import {useAcpConversations} from "@/features/runtime/hooks/useAcpConversations";
+import {runtimeBackendKey as getRuntimeBackendKey,isAcpConversation,acpRef} from "@/features/runtime/conversationIdentity";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import successSoundUrl from "@/assets/success-notification.mp3";
 import errorSoundUrl from "@/assets/error-notification.mp3";
@@ -277,6 +280,8 @@ export default function MainApp() {
 
   // Access mode is thread-scoped (best-effort persisted) and falls back to the app default.
 
+  const [runtimeSelected,setRuntimeSelected]=useState(false);
+  const codexWorkspace=runtimeSelected?null:activeWorkspace;
   const {
     models,
     selectedModel,
@@ -287,7 +292,7 @@ export default function MainApp() {
     selectedEffort,
     setSelectedEffort
   } = useModels({
-    activeWorkspace,
+    activeWorkspace: codexWorkspace,
     onDebug: addDebugEntry,
     preferredModelId,
     preferredEffort,
@@ -300,7 +305,7 @@ export default function MainApp() {
     selectedCollaborationModeId,
     setSelectedCollaborationModeId,
   } = useCollaborationModes({
-    activeWorkspace,
+    activeWorkspace: codexWorkspace,
     preferredModeId: preferredCollabModeId,
     selectionKey: threadCodexSelectionKey,
     onDebug: addDebugEntry,
@@ -389,7 +394,7 @@ export default function MainApp() {
     reasoningSupported,
     onFocusComposer: () => composerInputRef.current?.focus(),
   });
-  const { skills } = useSkills({ activeWorkspace, onDebug: addDebugEntry });
+  const { skills } = useSkills({ activeWorkspace: codexWorkspace, onDebug: addDebugEntry });
   const {
     prompts,
     createPrompt,
@@ -422,16 +427,16 @@ export default function MainApp() {
   });
 
   const {
-    setActiveThreadId,
+    setActiveThreadId: codexSetActiveThreadId,
     hasLocalThreadSnapshot,
     activeThreadId,
-    activeItems,
+    activeItems: codexActiveItems,
     approvals,
     userInputRequests,
-    threadsByWorkspace,
+    threadsByWorkspace: codexThreadsByWorkspace,
     threadParentById,
     isSubagentThread,
-    threadStatusById,
+    threadStatusById: codexThreadStatusById,
     threadResumeLoadingById,
     threadListLoadingByWorkspace,
     threadListPagingByWorkspace,
@@ -443,19 +448,19 @@ export default function MainApp() {
     planByThread,
     lastAgentMessageByThread,
     pinnedThreadsVersion,
-    interruptTurn,
-    removeThread,
-    pinThread,
-    unpinThread,
-    isThreadPinned,
-    getPinTimestamp,
-    renameThread,
+    interruptTurn: codexInterruptTurn,
+    removeThread: codexRemoveThread,
+    pinThread: codexPinThread,
+    unpinThread: codexUnpinThread,
+    isThreadPinned: codexIsThreadPinned,
+    getPinTimestamp: codexGetPinTimestamp,
+    renameThread: codexRenameThread,
     startThreadForWorkspace,
     listThreadsForWorkspaces,
     listThreadsForWorkspace,
     loadOlderThreadsForWorkspace,
     resetWorkspaceThreads,
-    refreshThread,
+    refreshThread: codexRefreshThread,
     sendUserMessage,
     sendUserMessageToThread,
     startFork,
@@ -512,11 +517,30 @@ export default function MainApp() {
     threadSortKey: threadListSortKey,
     onThreadCodexMetadataDetected: handleThreadCodexMetadataDetected,
   });
+  const setActiveThreadId=useCallback((id:string|null,workspaceId?:string)=>{setRuntimeSelected(isAcpConversation(id));codexSetActiveThreadId(id,workspaceId);},[codexSetActiveThreadId]);
+  const runtimeConversations=useAcpConversations({backendKey:getRuntimeBackendKey(appSettings),workspaces,activeThreadId,
+    onOpen:(workspaceId,key)=>{setActiveWorkspaceId(workspaceId);setActiveThreadId(key,workspaceId);setActiveTab("codex");},refreshWorkspaces});
+  const interruptTurn=()=>runtimeConversations.selected?runtimeConversations.stop():codexInterruptTurn();
+  const activeItems=runtimeConversations.selected?runtimeConversations.items:codexActiveItems;
+  const threadsByWorkspace=useMemo(()=>{
+    const result={...codexThreadsByWorkspace};
+    for(const [wid,rows] of Object.entries(runtimeConversations.summaries))result[wid]=[...new Map([...rows,...(result[wid]??[])].map(r=>[r.id,r])).values()].sort((a,b)=>b.updatedAt-a.updatedAt);
+    return result;
+  },[codexThreadsByWorkspace,runtimeConversations.summaries]);
+  const threadStatusById={...codexThreadStatusById,...runtimeConversations.statusById,...(runtimeConversations.selected&&activeThreadId?{[activeThreadId]:{isProcessing:!!runtimeConversations.active||!!runtimeConversations.pending||runtimeConversations.sending,isReviewing:false,hasUnread:false,processingStartedAt:null,lastDurationMs:null}}:{})};
+  const metadataError=(e:unknown)=>alert(String(e));
+  const removeThread=(wid:string,id:string)=>isAcpConversation(id)?void runtimeConversations.metadata(id,{hidden:true}).catch(metadataError):codexRemoveThread(wid,id);
+  const renameThread=(wid:string,id:string,name:string)=>isAcpConversation(id)?void runtimeConversations.metadata(id,{titleOverride:name}).catch(metadataError):codexRenameThread(wid,id,name);
+  const pinThread=(wid:string,id:string)=>{if(isAcpConversation(id)){void runtimeConversations.metadata(id,{pinned:true}).catch(metadataError);return true;}return codexPinThread(wid,id);};
+  const unpinThread=(wid:string,id:string)=>isAcpConversation(id)?void runtimeConversations.metadata(id,{pinned:false}).catch(metadataError):codexUnpinThread(wid,id);
+  const isThreadPinned=(wid:string,id:string)=>isAcpConversation(id)?!!runtimeConversations.catalog.find(r=>r.sessionId===acpRef(id)?.sessionId)?.presentation.pinned:Boolean(codexIsThreadPinned(wid,id));
+  const getPinTimestamp=(wid:string,id:string)=>isAcpConversation(id)?(isThreadPinned(wid,id)?1:null):codexGetPinTimestamp(wid,id);
+  const refreshThread=(wid:string,id:string)=>isAcpConversation(id)?runtimeConversations.refresh(id):codexRefreshThread(wid,id);
   const { connectionState: remoteThreadConnectionState, reconnectLive } =
     useRemoteThreadLiveConnection({
       backendMode: appSettings.backendMode,
       activeWorkspace,
-      activeThreadId,
+      activeThreadId: runtimeConversations.selected?null:activeThreadId,
       activeThreadHasLocalSnapshot: hasLocalThreadSnapshot(activeThreadId),
       activeThreadIsProcessing: Boolean(
         activeThreadId && threadStatusById[activeThreadId]?.isProcessing,
@@ -653,7 +677,7 @@ export default function MainApp() {
   );
 
   const { apps } = useApps({
-    activeWorkspace,
+    activeWorkspace: runtimeSelected?null:activeWorkspace,
     activeThreadId,
     enabled: appSettings.experimentalAppsEnabled,
     onDebug: addDebugEntry,
@@ -1240,7 +1264,7 @@ export default function MainApp() {
   const {
     handleAddWorkspace,
     handleAddWorkspaceFromGitUrl,
-    handleAddAgent,
+    handleAddAgent: codexHandleAddAgent,
     handleAddWorktreeAgent,
     handleAddCloneAgent,
     dropTargetRef: workspaceDropTargetRef,
@@ -1267,6 +1291,11 @@ export default function MainApp() {
       onDebug: addDebugEntry,
     },
   });
+
+  const handleAddAgent=(workspace:Parameters<typeof codexHandleAddAgent>[0])=>{
+    if(runtimeConversations.selected){if(runtimeConversations.session)void runtimeConversations.newConversation(workspace.id,runtimeConversations.session.profile.id).catch(e=>alert(String(e)));else runtimeConversations.setBrowserOpen(true);}
+    else codexHandleAddAgent(workspace);
+  };
 
   useInterruptShortcut({
     isEnabled: canInterrupt,
@@ -1492,6 +1521,7 @@ export default function MainApp() {
     typeof gitRootOverride === "string" && gitRootOverride.trim().length > 0;
   const showGitInitBanner =
     Boolean(activeWorkspace) && !hasGitRootOverride && isMissingRepo(gitStatus.error);
+  const runtimeBackendKey = getRuntimeBackendKey(appSettings);
   const displayNodes = useMainAppDisplayNodes({
     showCompactCodexThreadActions,
     handleMobileThreadRefresh,
@@ -1505,6 +1535,9 @@ export default function MainApp() {
     workspaceHomeProps: activeWorkspace
       ? {
           workspace: activeWorkspace,
+          runtimeBackendKey,
+          onRuntimeSelectionChange: workspaceHomeState.setRuntimeSelection,
+          requestedRuntimeSessionId: workspaceHomeState.openedRuntimeSessionId,
           showGitInitBanner,
           initGitRepoLoading,
           onInitGitRepo: modalActions.openInitGitRepoPrompt,
@@ -1686,7 +1719,9 @@ export default function MainApp() {
     startUncommittedReview,
     handleAddWorkspace,
     openWorkspaceFromUrlPrompt,
-    handleAddAgent,
+    // The sidebar chooser resolves ACP profiles itself; its Codex option must
+    // bypass the app-menu action that follows the selected runtime.
+    handleAddAgent: codexHandleAddAgent,
     handleAddWorktreeAgent,
     handleAddCloneAgent,
     handleOpenThreadLink,
@@ -1800,11 +1835,15 @@ export default function MainApp() {
     compactEmptyCodexNode,
     compactEmptyGitNode,
     compactGitBackNode,
-  } = useMainAppLayoutNodes(layoutSurfaces);
+  } = useMainAppLayoutNodes({...layoutSurfaces,primary:{...layoutSurfaces.primary,runtime:runtimeConversations}});
 
   const mainMessagesNode = showWorkspaceHome ? workspaceHomeNode : messagesNode;
   const compactThreadConnectionState: "live" | "polling" | "disconnected" =
-    !activeWorkspace?.connected
+    runtimeConversations.selected
+      ? runtimeConversations.page?.connectionReady && !runtimeConversations.page.readOnly
+        ? "live"
+        : runtimeConversations.page ? "polling" : "disconnected"
+      : !activeWorkspace?.connected
       ? "disconnected"
       : remoteThreadConnectionState;
   const mainAppShellProps = useMainAppShellProps({

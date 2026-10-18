@@ -1,6 +1,10 @@
 import type { RunContext } from "@/features/runs/types";
 import type { ApprovalDecision } from "@/types";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as nativeInvoke } from "@tauri-apps/api/core";
+function invoke<T>(command:string,args?:Record<string,unknown>):Promise<T>{
+  if(command!=="runtime_request"&&args&&["threadId","thread_id"].some(k=>typeof args[k]==="string"&&(args[k] as string).startsWith("acp:")))return Promise.reject(new Error("ACP conversation must use its runtime adapter"));
+  return args===undefined?nativeInvoke<T>(command):nativeInvoke<T>(command,args);
+}
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Options as NotificationOptions } from "@tauri-apps/plugin-notification";
 import type {
@@ -1218,3 +1222,20 @@ export function saveRunComparison(input: {leftCaptureId: string; rightCaptureId:
 export function listRunComparisons(input: {runId?: string; captureId?: string}) { return invoke<import("@/features/runs/types").RunComparison[]>("list_run_comparisons", {input}); }
 
 export function listRunTurns(instanceId: string) { return invoke<{id: string; status: string}[]>("list_run_turns", {input: {instanceId}}); }
+
+// Runtime profile and execution operations execute on the selected backend.
+export function runtimeRequest<T>(method: string, input: Record<string, unknown> = {}) {
+  return invoke<T>("runtime_request", {method, input});
+}
+export async function buildRuntimePrompt(text: string, images: string[], kind: import("@/features/runtime/types").RuntimeKind) {
+  const input: Record<string, unknown>[] = text ? [{type: "text", text}] : [];
+  for (const image of (await normalizeImagesForRpc(images) ?? [])) {
+    if (kind === "codex") input.push({type: "image", url: image});
+    else {
+      const match = /^data:([^;,]+);base64,(.*)$/s.exec(image);
+      if (!match) throw new Error("ACP image input requires inline image data");
+      input.push({type: "image", mimeType: match[1], data: match[2]});
+    }
+  }
+  return input;
+}

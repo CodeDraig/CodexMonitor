@@ -25,6 +25,7 @@ import type { ReviewPromptState, ReviewPromptStep } from "../../threads/hooks/us
 
 type ComposerInputProps = {
   text: string;
+  placeholder?: string;
   disabled: boolean;
   sendLabel: string;
   canStop: boolean;
@@ -82,7 +83,7 @@ type ComposerInputProps = {
 };
 
 export function ComposerInput({
-  text,
+  text, placeholder,
   disabled,
   sendLabel,
   canStop,
@@ -276,7 +277,7 @@ export function ComposerInput({
             placeholder={
               disabled
                 ? "Review in progress. Chat will re-enable when it completes."
-                : "Ask Codex to do something..."
+                : (placeholder ?? "Ask Codex to do something...")
             }
             value={text}
             onChange={handleTextareaChange}

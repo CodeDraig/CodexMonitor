@@ -1,3 +1,4 @@
+import {isAcpConversation} from "@/features/runtime/conversationIdentity";
 import { useWindowDrag } from "@/features/layout/hooks/useWindowDrag";
 import {
   REMOTE_WORKSPACE_REFRESH_INTERVAL_MS,
@@ -69,7 +70,7 @@ export function useMainAppWorkspaceLifecycle({
   useRemoteThreadRefreshOnFocus({
     backendMode,
     activeWorkspace,
-    activeThreadId,
+    activeThreadId: isAcpConversation(activeThreadId)?null:activeThreadId,
     activeThreadIsProcessing: Boolean(
       activeThreadId && threadStatusById[activeThreadId]?.isProcessing,
     ),

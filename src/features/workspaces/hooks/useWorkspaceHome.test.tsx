@@ -6,7 +6,7 @@ import { createRun, getRun, listRuns, recordRunFailure, recordRunSetup, reconcil
 import { useWorkspaceHome } from "./useWorkspaceHome";
 
 vi.mock("../../../services/tauri", () => ({
-  generateRunMetadata: vi.fn(),
+  generateRunMetadata: vi.fn(), runtimeRequest: vi.fn(), buildRuntimePrompt: vi.fn(),
   createRun: vi.fn(), getRun: vi.fn(), listRuns: vi.fn(), recordRunFailure: vi.fn(), recordRunSetup: vi.fn(), reconcileRun: vi.fn(), updateRunMetadata: vi.fn(),
 }));
 
@@ -322,4 +322,18 @@ describe("useWorkspaceHome", () => {
       "Select at least one model to run in a worktree.",
     );
   });
+});
+
+it.each(["open_code_acp", "acp"] as const)("launches an %s worktree through runtime IPC without Codex metadata or thread calls", async(kind)=>{
+  const addWorktreeAgent=vi.fn().mockResolvedValue({...worktreeWorkspace,connected:false});
+  const connectWorkspace=vi.fn();const startThreadForWorkspace=vi.fn();const sendUserMessageToThread=vi.fn();
+  const api=await import("../../../services/tauri");
+  vi.mocked(api.runtimeRequest).mockResolvedValue({sessionId:"runtime-session"});
+  vi.mocked(api.buildRuntimePrompt).mockResolvedValue([{type:"text",text:"OpenCode prompt"}]);
+  const {result}=renderHook(()=>useWorkspaceHome({activeWorkspace:workspace,models:[],selectedModelId:null,addWorktreeAgent,connectWorkspace,startThreadForWorkspace,sendUserMessageToThread}));
+  act(()=>{result.current.setRunMode("worktree");result.current.setDraft("OpenCode prompt");result.current.setRuntimeSelection([{id:"opencode",revision:1,name:"OpenCode",kind,executable:"opencode",args:[]}]);});
+  await act(async()=>{await result.current.startRun();});
+  expect(generateRunMetadata).not.toHaveBeenCalled();expect(connectWorkspace).not.toHaveBeenCalled();expect(startThreadForWorkspace).not.toHaveBeenCalled();expect(sendUserMessageToThread).not.toHaveBeenCalled();
+  expect(api.runtimeRequest).toHaveBeenCalledWith("submit",expect.objectContaining({sessionId:"runtime-session",runContext:expect.objectContaining({instanceId:"instance-0"})}));
+  expect(createRun).toHaveBeenCalledWith(expect.objectContaining({instances:[expect.objectContaining({runtimeProfileId:"opencode",modelLabel:"Agent default"})]}));
 });

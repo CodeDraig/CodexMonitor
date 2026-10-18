@@ -63,6 +63,9 @@ pub(super) async fn read_stdout<E: EventSink>(
             }
         };
 
+        for subscriber in session.runtime_subscribers.lock().await.values() {
+            let _ = subscriber.send(value.clone());
+        }
         let maybe_id = value.get("id").and_then(|id| id.as_u64());
         let has_method = value.get("method").is_some();
         let has_result_or_error = value.get("result").is_some() || value.get("error").is_some();
@@ -80,6 +83,12 @@ pub(super) async fn read_stdout<E: EventSink>(
         if let Some(id) = maybe_id {
             if has_result_or_error {
                 if let Some(context) = session.request_context.lock().await.remove(&id) {
+                    // Bind runtime ownership on the reader before delivering the
+                    // reply, so immediately following thread notifications cannot
+                    // race into the legacy conversation path.
+                    if let (Some(events), Some(tid)) = (context.runtime_events, thread_id.as_ref()) {
+                        session.runtime_subscribers.lock().await.insert(tid.clone(), events);
+                    }
                     request_workspace = Some(context.workspace_id);
                     request_method = Some(context.method);
                 }
@@ -234,8 +243,14 @@ pub(super) async fn read_stdout<E: EventSink>(
                     sent_to_background = true;
                 }
             }
-            // Don't emit to frontend if this is a background thread event
-            if !sent_to_background {
+            // Runtime conversations consume the durable runtime channel. Keep extension
+            // requests outside the common permission contract on the existing Codex UI.
+            let runtime_owned = if let Some(ref tid) = thread_id {
+                session.runtime_subscribers.lock().await.contains_key(tid)
+            } else { false };
+            let extension_request = value.get("id").is_some() && !matches!(method_name,
+                Some("item/commandExecution/requestApproval") | Some("item/fileChange/requestApproval"));
+            if !sent_to_background && (!runtime_owned || extension_request) {
                 if should_broadcast_global_workspace_notification(
                     method_name,
                     thread_id.as_ref(),

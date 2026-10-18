@@ -38,6 +38,7 @@ export type WorktreeRenameState = {
 };
 
 export type LayoutPrimarySurface = {
+  runtime?: import("@/features/runtime/hooks/useAcpConversations").AcpConversations;
   sidebarProps: ComponentProps<typeof Sidebar>;
   messagesProps: ComponentProps<typeof Messages>;
   composerProps: ComponentProps<typeof Composer> | null;

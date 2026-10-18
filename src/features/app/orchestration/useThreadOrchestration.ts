@@ -1,3 +1,4 @@
+import {isAcpConversation} from "@/features/runtime/conversationIdentity";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { pushErrorToast } from "@/services/toasts";
@@ -150,7 +151,7 @@ export function useThreadCodexSyncOrchestration({
     const threadId = activeThreadId ?? null;
     activeThreadIdRef.current = threadId;
 
-    if (!workspaceId) {
+    if (!workspaceId || isAcpConversation(threadId)) {
       return;
     }
 

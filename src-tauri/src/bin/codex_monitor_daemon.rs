@@ -84,6 +84,7 @@ const MAX_IN_FLIGHT_RPC_PER_CONNECTION: usize = 32;
 const DAEMON_NAME: &str = "codex-monitor-daemon";
 
 struct DaemonState {
+    runtime_registry: shared::agent_runtime::RuntimeRegistry,
     data_dir: PathBuf,
     workspaces: Mutex<HashMap<String, WorkspaceEntry>>,
     sessions: Mutex<HashMap<String, Arc<WorkspaceSession>>>,
@@ -105,6 +106,7 @@ impl DaemonState {
             .ok()
             .and_then(|path| path.to_str().map(str::to_string));
         Self {
+            runtime_registry: Default::default(),
             data_dir: config.data_dir.clone(),
             workspaces: Mutex::new(workspaces),
             sessions: Mutex::new(HashMap::new()),

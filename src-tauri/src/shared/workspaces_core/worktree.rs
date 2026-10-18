@@ -17,7 +17,7 @@ use crate::types::{
     WorktreeSetupStatus,
 };
 
-use super::connect::{kill_session_by_id, take_live_shared_session, workspace_session_spawn_lock};
+use super::connect::{kill_session_by_id, take_compatible_session, workspace_session_spawn_lock};
 use super::helpers::{
     copy_agents_md_from_parent_to_worktree, normalize_setup_script, workspace_path_to_string,
     worktree_setup_marker_path, AGENTS_MD_FILE_NAME,
@@ -249,21 +249,23 @@ where
         },
     };
 
+    let start_codex = if let Some((path, context, _, _)) = &tracking {
+        let instance_id = context.instance_id.clone();
+        with_store(path.clone(), move |store| Ok(store.instance(&instance_id)?.requested.pointer("/runtime/kind").and_then(serde_json::Value::as_str) != Some("open_code_acp"))).await?
+    } else { true };
     let _spawn_guard = workspace_session_spawn_lock().lock().await;
-    let existing_session = take_live_shared_session(sessions).await;
-    let session = if let Some(existing_session) = existing_session {
-        existing_session
-    } else {
+    let session = if start_codex {
         let (default_bin, codex_args) = {
             let settings = app_settings.lock().await;
-            (
-                settings.codex_bin.clone(),
-                resolve_workspace_codex_args(&entry, Some(&parent_entry), Some(&settings)),
-            )
+            (settings.codex_bin.clone(), resolve_workspace_codex_args(&entry, Some(&parent_entry), Some(&settings)))
         };
         let codex_home = resolve_workspace_codex_home(&entry, Some(&parent_entry));
-        spawn_session(entry.clone(), default_bin, codex_args, codex_home).await?
-    };
+        let identity = serde_json::json!({"executable":default_bin.as_deref().unwrap_or("codex"),"args":codex_args,"home":codex_home});
+        let existing_session = take_compatible_session(sessions, &identity).await;
+        Some(if let Some(existing_session) = existing_session { existing_session } else {
+            spawn_session(entry.clone(), default_bin, codex_args, codex_home).await?
+        })
+    } else { None };
 
     {
         let mut workspaces = workspaces.lock().await;
@@ -272,16 +274,17 @@ where
         write_workspaces(storage_path, &list)?;
     }
 
-    session
-        .register_workspace_with_path(&entry.id, Some(&entry.path))
-        .await;
-    sessions.lock().await.insert(entry.id.clone(), session);
+    let connected = session.is_some();
+    if let Some(session) = session {
+        session.register_workspace_with_path(&entry.id, Some(&entry.path)).await;
+        sessions.lock().await.insert(entry.id.clone(), session);
+    }
 
     let info = WorkspaceInfo {
         id: entry.id,
         name: entry.name,
         path: entry.path,
-        connected: true,
+        connected,
         kind: entry.kind,
         parent_id: entry.parent_id,
         worktree: entry.worktree,

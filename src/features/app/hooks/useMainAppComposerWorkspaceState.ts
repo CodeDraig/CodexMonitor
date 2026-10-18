@@ -1,4 +1,4 @@
-import { getActiveRemoteBackend } from "@settings/utils/remoteBackends";
+import { runtimeBackendKey } from "@/features/runtime/conversationIdentity";
 import { useMemo, type RefObject } from "react";
 import type {
   AppSettings,
@@ -250,7 +250,7 @@ export function useMainAppComposerWorkspaceState({
   });
 
   const workspaceHomeState = useWorkspaceHome({
-    backendKey: `${settings.backendMode}:${getActiveRemoteBackend(settings).host}`,
+    backendKey: runtimeBackendKey(settings),
     visible: showWorkspaceHome,
     activeWorkspace,
     models: modelOptions,

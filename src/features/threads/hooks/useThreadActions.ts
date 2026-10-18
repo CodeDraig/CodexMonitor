@@ -1,3 +1,4 @@
+import {isAcpConversation} from "@/features/runtime/conversationIdentity";
 import { pushErrorToast } from "@services/toasts";
 import { useCallback, useRef } from "react";
 import type { Dispatch, MutableRefObject } from "react";
@@ -195,6 +196,7 @@ export function useThreadActions({
       force = false,
       replaceLocal = false,
     ) => {
+      if (isAcpConversation(threadId)) return threadId;
       if (!threadId) {
         return null;
       }
@@ -854,6 +856,7 @@ export function useThreadActions({
 
   const archiveThread = useCallback(
     async (workspaceId: string, threadId: string) => {
+      if(isAcpConversation(threadId))return;
       try {
         await archiveThreadService(workspaceId, threadId);
       } catch (error) {

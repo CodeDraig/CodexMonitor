@@ -17,6 +17,7 @@ impl EventSink for TauriEventSink {
     fn run_store_path(&self) -> Option<std::path::PathBuf> {
         self.app.path().app_data_dir().ok().map(|dir| dir.join("runs.sqlite3"))
     }
+    fn emit_runtime_event(&self, event: serde_json::Value) { let _ = self.app.emit("runtime-event", event); }
     fn emit_app_server_event(&self, event: AppServerEvent) {
         let _ = self.app.emit("app-server-event", event);
     }

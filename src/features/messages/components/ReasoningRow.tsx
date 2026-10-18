@@ -1,3 +1,4 @@
+import {AcpContent} from "@/features/runtime/components/AcpContent";
 import { memo } from "react";
 import Brain from "lucide-react/dist/esm/icons/brain";
 import type { ConversationItem } from "@/types";
@@ -61,6 +62,7 @@ export const ReasoningRow = memo(function ReasoningRow({
             onOpenThreadLink={onOpenThreadLink}
           />
         )}
+        {isExpanded&&item.acpContent&&<AcpContent {...item.acpContent}/>}
       </div>
     </div>
   );

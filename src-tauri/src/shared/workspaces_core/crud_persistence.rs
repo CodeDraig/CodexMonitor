@@ -771,3 +771,39 @@ mod tests {
         assert!(err.contains("without separators or traversal"));
     }
 }
+
+/// Register an ACP-reported directory on this backend without launching Codex.
+pub(crate) async fn register_workspace_core(
+    path: &str,
+    preferred_id: Option<String>,
+    workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
+    storage_path: &PathBuf,
+) -> Result<WorkspaceEntry,String> {
+    let canonical=std::fs::canonicalize(path).map_err(|e|format!("invalid_input: agent directory is unavailable: {path}: {e}"))?;
+    if !canonical.is_dir(){return Err("invalid_input: agent directory is not a folder".into());}
+    let path=workspace_path_to_string(&canonical);
+    let mut current=workspaces.lock().await;
+    let known=current.clone();let storage=storage_path.clone();
+    let new_id=preferred_id.unwrap_or_else(||Uuid::new_v4().to_string());
+    // The same SQLite writer lock used by desktop/daemon registration serializes
+    // the fresh-file merge. No native session is started in this operation.
+    let (entry,merged)=crate::shared::agent_runtime::registry::persist(crate::shared::runs_core::db_path(storage_path),move|store|{
+        let tx=store.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(crate::shared::runs_core::store::error)?;
+        let mut merged=if storage.exists(){crate::storage::read_workspaces(&storage)?}else{known.clone()};
+        if let Some(entry)=merged.values().find(|e|std::fs::canonicalize(&e.path).ok().as_ref()==Some(&canonical)).cloned(){tx.commit().map_err(crate::shared::runs_core::store::error)?;return Ok((entry,merged));}
+        if merged.contains_key(&new_id){return Err("invalid_input: workspace identity belongs to another directory".into());}
+        let entry=WorkspaceEntry{id:new_id.clone(),name:Path::new(&path).file_name().and_then(|s|s.to_str()).unwrap_or("Workspace").into(),path:path.clone(),kind:WorkspaceKind::Main,parent_id:None,worktree:None,settings:WorkspaceSettings{codex_auto_connect:Some(false),..Default::default()}};
+        merged.insert(entry.id.clone(),entry.clone());
+        let temporary=storage.with_file_name(format!("workspaces.acp-pending-{}.json",Uuid::new_v4()));
+        // Preserve fields from other clients that this build does not understand.
+        let mut raw:Vec<serde_json::Value>=if storage.exists(){serde_json::from_slice(&std::fs::read(&storage).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?}else{known.values().map(serde_json::to_value).collect::<Result<_,_>>().map_err(|e|e.to_string())?};
+        raw.push(serde_json::to_value(&entry).map_err(|e|e.to_string())?);
+        std::fs::write(&temporary,serde_json::to_vec_pretty(&raw).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        std::fs::File::open(&temporary).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+        if storage.exists(){let backup=storage.with_file_name(format!("workspaces.acp-backup-{}.json",Uuid::new_v4()));std::fs::copy(&storage,&backup).map_err(|e|e.to_string())?;}
+        std::fs::rename(&temporary,&storage).map_err(|e|e.to_string())?;
+        tx.commit().map_err(crate::shared::runs_core::store::error)?;
+        Ok((entry,merged))
+    }).await?;
+    *current=merged;Ok(entry)
+}

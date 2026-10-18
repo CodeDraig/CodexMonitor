@@ -26,7 +26,7 @@ export function useWorkspaceRestore({
       return;
     }
     const pending = workspaces.filter(
-      (workspace) => !restoredWorkspaces.current.has(workspace.id),
+      (workspace) => workspace.settings.codexAutoConnect !== false && !restoredWorkspaces.current.has(workspace.id),
     );
     if (pending.length === 0) {
       return;

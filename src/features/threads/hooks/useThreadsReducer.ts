@@ -26,6 +26,7 @@ type ThreadActivityStatus = {
 
 export type ThreadState = {
   activeThreadIdByWorkspace: Record<string, string | null>;
+  activeConversationRefByWorkspace: Record<string, import("@/features/runtime/types").ConversationRef | null>;
   itemsByThread: Record<string, ConversationItem[]>;
   maxItemsPerThread: number | null;
   threadsByWorkspace: Record<string, ThreadSummary[]>;
@@ -182,6 +183,7 @@ const emptyItems: Record<string, ConversationItem[]> = {};
 
 export const initialState: ThreadState = {
   activeThreadIdByWorkspace: {},
+  activeConversationRefByWorkspace: {},
   itemsByThread: emptyItems,
   maxItemsPerThread: CHAT_SCROLLBACK_DEFAULT,
   threadsByWorkspace: {},

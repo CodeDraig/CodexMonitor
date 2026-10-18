@@ -232,3 +232,13 @@ mod tests {
         );
     }
 }
+
+/// Refresh registrations made by another backend sharing this data directory.
+pub(crate) async fn sync_workspaces_from_storage_core(
+    storage_path:&std::path::PathBuf,
+    workspaces:&tokio::sync::Mutex<std::collections::HashMap<String,crate::types::WorkspaceEntry>>,
+    sessions:&tokio::sync::Mutex<std::collections::HashMap<String,std::sync::Arc<crate::backend::app_server::session::WorkspaceSession>>>,
+)->Result<(),String>{
+    let ids={let mut entries=workspaces.lock().await;let stored=crate::storage::read_workspaces(storage_path)?;let ids=stored.keys().cloned().collect();*entries=stored;ids};
+    super::connect::prune_workspace_sessions_core(sessions,&ids).await;Ok(())
+}

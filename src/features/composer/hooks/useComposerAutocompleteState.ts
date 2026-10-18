@@ -17,6 +17,8 @@ type UseComposerAutocompleteStateArgs = {
   selectionStart: number | null;
   disabled: boolean;
   appsEnabled: boolean;
+  runtimeMode?: boolean;
+  runtimeCommands?: {name:string;description?:string}[];
   skills: Skill[];
   apps: AppOption[];
   prompts: CustomPromptOption[];
@@ -75,6 +77,8 @@ export function useComposerAutocompleteState({
   selectionStart,
   disabled,
   appsEnabled,
+  runtimeMode = false,
+  runtimeCommands,
   skills,
   apps,
   prompts,
@@ -148,6 +152,7 @@ export function useComposerAutocompleteState({
   );
 
   const slashCommandItems = useMemo<AutocompleteItem[]>(() => {
+    if(runtimeMode)return (runtimeCommands??[]).map(c=>({id:c.name,label:c.name,description:c.description,insertText:c.name,group:"Slash" as const}));
     const commands: AutocompleteItem[] = [
       {
         id: "compact",
@@ -216,7 +221,7 @@ export function useComposerAutocompleteState({
       });
     }
     return commands.sort((a, b) => a.label.localeCompare(b.label));
-  }, [appsEnabled]);
+  }, [appsEnabled,runtimeMode,runtimeCommands]);
 
   const slashItems = useMemo<AutocompleteItem[]>(
     () => [...slashCommandItems, ...promptItems],

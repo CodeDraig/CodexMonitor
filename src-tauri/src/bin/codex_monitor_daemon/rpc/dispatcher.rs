@@ -6,6 +6,13 @@ pub(super) async fn dispatch_rpc_request(
     params: &Value,
     client_version: &str,
 ) -> Result<Value, String> {
+    if method == "runtime_request" {
+        return crate::shared::runtime_rpc::dispatch(
+            params["method"].as_str().ok_or("invalid_input: missing runtime method")?,
+            params["input"].clone(), crate::shared::runs_core::db_path(&state.storage_path),
+            &state.runtime_registry, &state.workspaces, &state.sessions, &state.app_settings, state.event_sink.clone(),
+        ).await;
+    }
     if crate::shared::runs_rpc::METHODS.contains(&method) {
         return crate::shared::runs_rpc::dispatch(
             method,

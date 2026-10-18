@@ -122,7 +122,14 @@ export function subscribeAppServerEvents(
   onEvent: (event: AppServerEvent) => void,
   options?: SubscriptionOptions,
 ): Unsubscribe {
-  return appServerHub.subscribe(onEvent, options);
+  const native=appServerHub.subscribe(onEvent, options);
+  // Runtime-owned Codex notifications have one authoritative durable path.
+  // Unowned threads continue to use app-server-event directly.
+  const runtime=runtimeHub.subscribe(event=>{
+    if(event.runtime?.kind!=="codex"||event.source!=="live"||!event.workspaceId||typeof event.raw?.method!=="string"||event.raw.method.startsWith("runtime/"))return;
+    onEvent({workspace_id:event.workspaceId,message:event.raw});
+  },options);
+  return ()=>{native();runtime();};
 }
 
 export function subscribeDictationDownload(
@@ -368,3 +375,6 @@ export function subscribeMenuComposerCycleCollaboration(
     onEvent();
   }, options);
 }
+
+const runtimeHub = createEventHub<import("@/features/runtime/types").RuntimeEvent>("runtime-event");
+export const subscribeRuntimeEvents = runtimeHub.subscribe;

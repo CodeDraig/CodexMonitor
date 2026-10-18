@@ -42,6 +42,7 @@ fn make_temp_dir(prefix: &str) -> PathBuf {
 fn test_state(data_dir: &std::path::Path) -> DaemonState {
     let (tx, _rx) = broadcast::channel::<DaemonEvent>(32);
     DaemonState {
+        runtime_registry: Default::default(),
         data_dir: data_dir.to_path_buf(),
         workspaces: Mutex::new(HashMap::new()),
         sessions: Mutex::new(HashMap::new()),
@@ -117,6 +118,9 @@ fn make_session(entry: WorkspaceEntry) -> Arc<WorkspaceSession> {
         thread_workspace: Mutex::new(HashMap::new()),
         hidden_thread_ids: Mutex::new(HashSet::new()),
         next_id: AtomicU64::new(0),
+        launch_identity: None,
+            initialization: Default::default(),
+            runtime_subscribers: Default::default(),
         run_recorders: Mutex::new(HashMap::new()),
         background_thread_callbacks: Mutex::new(HashMap::new()),
         workspace_ids: Mutex::new(HashSet::from([owner_workspace_id.clone()])),
@@ -491,5 +495,23 @@ fn list_workspaces_sync_prunes_stale_sessions() {
         }
 
         let _ = std::fs::remove_dir_all(&tmp);
+    });
+}
+
+#[test]
+fn recorded_opencode_worktree_does_not_spawn_codex() {
+    run_async_test(async {
+        let dir=make_temp_dir("runtime-worktree");
+        let repo=dir.join("repo");std::fs::create_dir_all(&repo).unwrap();
+        for args in [vec!["init","-q"],vec!["config","user.email","fixture@example.invalid"],vec!["config","user.name","Fixture"]] {
+            assert!(std::process::Command::new("git").args(args).current_dir(&repo).status().unwrap().success());
+        }
+        std::fs::write(repo.join("base"),"base").unwrap();
+        for args in [vec!["add","base"],vec!["commit","-qm","base"]] {assert!(std::process::Command::new("git").args(args).current_dir(&repo).status().unwrap().success());}
+        let state=test_state(&dir);insert_workspace(&state,"w",repo.to_str().unwrap()).await;
+        state.app_settings.lock().await.codex_bin=Some("/nonexistent/codex-must-not-start".into());
+        let run=crate::shared::runs_rpc::dispatch("create_run",json!({"requestId":uuid::Uuid::new_v4().to_string(),"workspaceId":"w","title":"OpenCode","prompt":"fixture","mode":"worktree","images":[],"instances":[{"runtime":{"kind":"open_code_acp"}}]}),dir.join("runs.sqlite3"),&state.workspaces,&state.sessions).await.unwrap();
+        let info=state.add_worktree("w".into(),"runtime-opencode-fixture".into(),None,false,Some(crate::shared::runs_core::types::RunContext{run_id:run["id"].as_str().unwrap().into(),instance_id:run["instances"][0]["id"].as_str().unwrap().into()}),"test".into()).await.unwrap();
+        assert!(!info.connected);assert!(state.sessions.lock().await.is_empty());assert!(std::path::Path::new(&info.path).join("base").exists());
     });
 }

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) type Result<T> = std::result::Result<T, String>;
 const BUSY_PREFIX: &str = "Run store busy: ";
-fn error(e: impl std::error::Error + 'static) -> String {
+pub(crate) fn error(e: impl std::error::Error + 'static) -> String {
     if (&e as &dyn std::error::Error)
         .downcast_ref::<rusqlite::Error>()
         .and_then(rusqlite::Error::sqlite_error_code)
@@ -27,7 +27,7 @@ fn decode<T: serde::de::DeserializeOwned>(v: String) -> Result<T> {
 }
 
 pub(crate) struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
     pub store_id: String,
 }
 impl Store {
@@ -43,7 +43,7 @@ impl Store {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 1 {
+        if version > 3 {
             return Err(format!("Unsupported run schema {version}"));
         }
         // WAL lets the desktop retain a read snapshot while the daemon commits.
@@ -62,11 +62,16 @@ impl Store {
             }
         }
         // Reads of an existing schema must not reserve SQLite's single writer.
-        if version == 1 {
+        if version == 3 {
             let store_id = conn
                 .query_row("SELECT id FROM metadata", [], |r| r.get(0))
                 .map_err(error)?;
             return Ok(Self { conn, store_id });
+        }
+        // VACUUM INTO includes committed WAL pages and never overwrites an old backup.
+        if version == 1 || version == 2 {
+            let backup = path.with_file_name(format!("runs.schema{version}-backup-{}.sqlite3", id()));
+            conn.execute("VACUUM INTO ?", [backup.to_string_lossy().as_ref()]).map_err(error)?;
         }
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -75,7 +80,7 @@ impl Store {
         let version: u32 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 1 {
+        if version > 3 {
             return Err(format!("Unsupported run schema {version}"));
         }
         if version == 0 {
@@ -96,6 +101,13 @@ impl Store {
                 PRAGMA user_version=1;").map_err(error)?;
             tx.execute("INSERT INTO metadata VALUES(?)", [id()])
                 .map_err(error)?;
+        }
+        if version < 2 {
+            tx.execute_batch(crate::shared::agent_runtime::store::SCHEMA).map_err(error)?;
+        }
+        if version < 3 {
+            tx.execute_batch(crate::shared::agent_runtime::conversations::SCHEMA).map_err(error)?;
+            crate::shared::agent_runtime::conversations::backfill(&tx)?;
         }
         let store_id = tx
             .query_row("SELECT id FROM metadata", [], |r| r.get(0))
@@ -231,6 +243,7 @@ impl Store {
                 workspace_path: (input.mode == "local").then(|| path.clone()),
                 thread_id: None,
                 initial_turn_id: None,
+                runtime: None, session_id: None, initial_execution_id: None,
                 submission_outcome: SubmissionOutcome::NotSubmitted,
                 execution_outcome: ExecutionOutcome::NotStarted,
                 submission: None,
@@ -451,6 +464,7 @@ impl Store {
             id: capture.id.clone(),
             kind: capture.kind.clone(),
             turn_id: capture.turn_id.clone(),
+            execution_id: capture.execution_id.clone(),
             label: capture.label.clone(),
             created_at: capture.created_at,
             complete: capture.complete,
@@ -568,11 +582,16 @@ impl Store {
         if record.revision != revision {
             return Err("conflict: comparison notes changed; reload before saving".into());
         }
+        // Keep acknowledged comparison revisions recoverable alongside the current row.
+        if record.revision > 0 {
+            tx.execute("INSERT OR IGNORE INTO comparison_revisions VALUES(?,?,?)", params![record.id,record.revision,encode(&record)?]).map_err(error)?;
+        }
         record.choice = choice;
         record.notes = notes;
         record.revision += 1;
         record.updated_at = now();
         tx.execute("INSERT INTO comparisons VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,payload=excluded.payload", params![record.id,record.left_capture_id,record.right_capture_id,record.revision,encode(&record)?]).map_err(error)?;
+        tx.execute("INSERT INTO comparison_revisions VALUES(?,?,?)", params![record.id,record.revision,encode(&record)?]).map_err(error)?;
         tx.commit().map_err(error)?;
         Ok(record)
     }

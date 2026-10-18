@@ -15,10 +15,13 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) struct RequestContext {
     pub(super) workspace_id: String,
     pub(super) method: String,
+    pub(super) runtime_events: Option<mpsc::UnboundedSender<Value>>,
 }
 
 pub(crate) struct WorkspaceSession {
     pub(crate) codex_args: Option<String>,
+    pub(crate) launch_identity: Option<Value>,
+    pub(crate) initialization: Mutex<Value>,
     pub(crate) activity: Mutex<crate::shared::session_activity::SessionActivity>,
     pub(crate) child: Mutex<Child>,
     pub(crate) stdin: Mutex<ChildStdin>,
@@ -27,6 +30,7 @@ pub(crate) struct WorkspaceSession {
     pub(crate) thread_workspace: Mutex<HashMap<String, String>>,
     pub(crate) hidden_thread_ids: Mutex<HashSet<String>>,
     pub(crate) next_id: AtomicU64,
+    pub(crate) runtime_subscribers: Mutex<HashMap<String, mpsc::UnboundedSender<Value>>>,
     /// Ordered run evidence queues; consumers perform storage and history work.
     pub(crate) run_recorders: Mutex<HashMap<String, mpsc::UnboundedSender<Value>>>,
     /// Callbacks for hidden background threads.
@@ -91,6 +95,26 @@ impl WorkspaceSession {
         method: &str,
         params: Value,
     ) -> Result<Value, String> {
+        self.send_routed_request(workspace_id, method, params, None).await
+    }
+
+    pub(crate) async fn send_runtime_request_for_workspace(
+        &self,
+        workspace_id: &str,
+        method: &str,
+        params: Value,
+        events: mpsc::UnboundedSender<Value>,
+    ) -> Result<Value, String> {
+        self.send_routed_request(workspace_id, method, params, Some(events)).await
+    }
+
+    async fn send_routed_request(
+        &self,
+        workspace_id: &str,
+        method: &str,
+        params: Value,
+        runtime_events: Option<mpsc::UnboundedSender<Value>>,
+    ) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         // This reservation shares a lock with runtime replacement. Keep it even
         // after a timeout/write failure: the server may have accepted the request.
@@ -107,6 +131,7 @@ impl WorkspaceSession {
             RequestContext {
                 workspace_id: workspace_id.to_string(),
                 method: method.to_string(),
+                runtime_events,
             },
         );
         if let Some(thread_id) = extract_thread_id(&json!({ "params": params.clone() })) {
@@ -151,7 +176,10 @@ impl WorkspaceSession {
     }
 
     pub(crate) async fn send_response(&self, id: Value, result: Value) -> Result<(), String> {
-        self.write_message(json!({ "id": id, "result": result }))
-            .await
+        self.write_message(json!({ "id": id, "result": result })).await?;
+        for subscriber in self.runtime_subscribers.lock().await.values() {
+            let _=subscriber.send(json!({"method":"runtime/native_permission_settled","params":{"nativeRequestId":id}}));
+        }
+        Ok(())
     }
 }

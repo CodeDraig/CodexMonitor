@@ -58,7 +58,7 @@ where
         let sessions = sessions.lock().await;
         (
             sessions.contains_key(&entry.id),
-            sessions.values().next().cloned(),
+            sessions.get(&entry.id).cloned(),
         )
     };
     if !workspace_connected {
@@ -94,7 +94,7 @@ where
     activity.retired = true;
     let workspace_ids = {
         let mut sessions = sessions.lock().await;
-        let keys: Vec<String> = sessions.keys().cloned().collect();
+        let keys: Vec<String> = sessions.iter().filter(|(_, candidate)| Arc::ptr_eq(candidate, &current_session)).map(|(key, _)| key.clone()).collect();
         for key in &keys {
             sessions.insert(key.clone(), Arc::clone(&new_session));
         }
@@ -184,6 +184,9 @@ mod tests {
             thread_workspace: Mutex::new(HashMap::new()),
             hidden_thread_ids: Mutex::new(HashSet::new()),
             next_id: AtomicU64::new(0),
+            launch_identity: None,
+            initialization: Default::default(),
+            runtime_subscribers: Default::default(),
             run_recorders: Mutex::new(HashMap::new()),
             background_thread_callbacks: Mutex::new(HashMap::new()),
             owner_workspace_id: "test-owner".to_string(),
@@ -378,4 +381,20 @@ mod tests {
             kill_child_process_tree(&mut *new_session.child.lock().await).await;
         });
     }
+    #[test]
+    fn runtime_change_preserves_an_unrelated_process_and_its_activity() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let entry=make_workspace_entry("selected");let other_entry=make_workspace_entry("unrelated");
+            let current=Arc::new(make_session(entry.clone(),Some("--old".into())));
+            let other=Arc::new(make_session(other_entry.clone(),Some("--unrelated".into())));
+            other.activity.lock().await.begin_request(99,"turn/start",Some("other-turn".into())).unwrap();
+            let workspaces=Mutex::new(HashMap::from([(entry.id.clone(),entry.clone()),(other_entry.id.clone(),other_entry.clone())]));
+            let sessions=Mutex::new(HashMap::from([(entry.id.clone(),current),(other_entry.id.clone(),other.clone())]));
+            set_workspace_runtime_codex_args_core(entry.id.clone(),Some("--new".into()),&workspaces,&sessions,&Mutex::new(AppSettings::default()),|entry,_,args,_|async move{Ok(Arc::new(make_session(entry,args)))}).await.unwrap();
+            assert!(Arc::ptr_eq(sessions.lock().await.get(&other_entry.id).unwrap(),&other));
+            assert!(!other.activity.lock().await.retired);assert!(other.child.lock().await.try_wait().unwrap().is_none());
+            for session in sessions.lock().await.values(){kill_child_process_tree(&mut *session.child.lock().await).await;}
+        });
+    }
+
 }

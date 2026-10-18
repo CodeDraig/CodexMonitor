@@ -86,6 +86,7 @@ pub(crate) async fn list_workspaces(
         return serde_json::from_value(response).map_err(|err| err.to_string());
     }
 
+    if let Err(e)=workspaces_core::sync_workspaces_from_storage_core(&state.storage_path,&state.workspaces,&state.sessions).await {eprintln!("Failed to refresh workspace registrations: {e}");}
     Ok(workspaces_core::list_workspaces_core(&state.workspaces, &state.sessions).await)
 }
 

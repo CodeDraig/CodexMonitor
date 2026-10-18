@@ -3,12 +3,13 @@ export type SubmissionOutcome = "not_submitted" | "submitting" | "accepted" | "r
 export type ExecutionOutcome = "not_started" | "running" | "completed" | "failed" | "interrupted" | "unknown";
 export type CaptureKind = "initial_turn" | "manual" | "recovered";
 export type RunLaunchReceipt = RunContext & { outcome: SubmissionOutcome; threadId: string | null; turnId: string | null; message: string | null };
-export type RunSettings = { modelId?: string | null; model?: string | null; modelLabel?: string; effort?: string | null; serviceTier?: string | null; collaborationMode?: Record<string, unknown> | null; accessMode?: string };
+export type RunSettings = { runtime?: import("@/features/runtime/types").RuntimeRef; runtimeProfileId?: string; runtimeName?: string; modelId?: string | null; model?: string | null; modelLabel?: string; effort?: string | null; serviceTier?: string | null; collaborationMode?: Record<string, unknown> | null; accessMode?: string };
 export type RunGitSnapshot = { available: boolean; baseOid?: string | null; headOid?: string | null; startedAt?: number; finishedAt?: number; concurrentChangeDetected?: boolean; atomic?: boolean; files: {path: string; status: string; diff: string; omission: string | null}[]; errors: string[] };
-export type CaptureSummary = { id: string; kind: CaptureKind; turnId: string; label: string; createdAt: number; complete: boolean };
+export type CaptureSummary = { id: string; kind: CaptureKind; turnId: string; executionId?: string; label: string; createdAt: number; complete: boolean };
 export type RunInstance = {
   id: string; runId: string; ordinal: number; requested: RunSettings; preparation: string;
   workspaceId: string | null; workspacePath: string | null; threadId: string | null; initialTurnId: string | null;
+  runtime?: import("@/features/runtime/types").RuntimeRef; sessionId?: string; initialExecutionId?: string;
   submissionOutcome: SubmissionOutcome; executionOutcome: ExecutionOutcome; submission: Record<string, unknown> | null;
   baseline: RunGitSnapshot | null; setup: {status: string; message?: string}; error: string | null; captures: CaptureSummary[];
 };

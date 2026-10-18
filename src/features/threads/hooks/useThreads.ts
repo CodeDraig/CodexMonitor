@@ -1,3 +1,4 @@
+import {isAcpConversation} from "@/features/runtime/conversationIdentity";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import * as Sentry from "@sentry/react";
 import type {
@@ -156,14 +157,14 @@ export function useThreads({
 
   const { refreshAccountRateLimits } = useThreadRateLimits({
     activeWorkspaceId,
-    activeWorkspaceConnected: activeWorkspace?.connected,
+    activeWorkspaceConnected: !isAcpConversation(activeThreadId) && activeWorkspace?.connected,
     getCurrentRateLimits,
     dispatch,
     onDebug,
   });
   const { refreshAccountInfo } = useThreadAccountInfo({
     activeWorkspaceId,
-    activeWorkspaceConnected: activeWorkspace?.connected,
+    activeWorkspaceConnected: !isAcpConversation(activeThreadId) && activeWorkspace?.connected,
     dispatch,
     onDebug,
   });
@@ -588,7 +589,7 @@ export function useThreads({
 
   const ensureWorkspaceRuntimeCodexArgsBestEffort = useCallback(
     async (workspaceId: string, threadId: string | null, phase: string) => {
-      if (!ensureWorkspaceRuntimeCodexArgs) {
+      if (isAcpConversation(threadId) || !ensureWorkspaceRuntimeCodexArgs) {
         return;
       }
       try {
@@ -799,7 +800,7 @@ export function useThreads({
           },
         });
       }
-      if (threadId) {
+      if (threadId && !isAcpConversation(threadId)) {
         void (async () => {
           const hasLocalSnapshot = hasLocalThreadSnapshot(threadId);
           if (hasLocalSnapshot) {

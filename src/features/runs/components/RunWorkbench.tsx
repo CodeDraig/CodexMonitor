@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { captureRunInstance, getRunCapture, listRunComparisons, listRunTurns, listWorkspaces, reconcileRun, saveRunComparison } from "@services/tauri";
+import { captureRunInstance, runtimeRequest, getRunCapture, listRunComparisons, listRunTurns, listWorkspaces, reconcileRun, saveRunComparison } from "@services/tauri";
 import { GitDiffViewer } from "@/features/git/components/GitDiffViewer";
 import type { RunCapture, RunComparison, RunInstance, RunRecord } from "../types";
 import "../runs.css";
 
-type Props = { runs: RunRecord[]; onSelectInstance: (workspaceId: string, threadId: string) => void };
+type Props = { runs: RunRecord[]; onSelectInstance: (workspaceId: string, threadId: string) => void; onSelectRuntimeSession?: (sessionId: string) => void };
 type Tab = "Output" | "Settings" | "Commands" | "Tokens" | "Files";
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
-export function RunWorkbench({runs, onSelectInstance}: Props) {
+export function RunWorkbench({runs, onSelectInstance, onSelectRuntimeSession}: Props) {
   const options = useMemo(() => runs.flatMap(run => run.instances.flatMap(instance => instance.captures.map(capture => ({run, instance, capture})))), [runs]);
   const [leftId, setLeftId] = useState("");
   const [rightId, setRightId] = useState("");
@@ -62,12 +62,13 @@ export function RunWorkbench({runs, onSelectInstance}: Props) {
       <p>Base: {run.baseOid ?? "unavailable"} · Workspace: {run.workspaceName}</p>
       <button type="button" className="ghost" onClick={async () => {try {const result = await reconcileRun(run.id); setError(result.errors.length ? result.errors.join("; ") : null);} catch (e) {setError(String(e));}}}>Reconcile saved run</button>
       {run.instances.map(instance => <div key={instance.id} className="run-instance-detail">
-        <strong>{instance.requested.modelLabel ?? "Default model"} #{instance.ordinal + 1}</strong>
+        <strong>{instance.requested.runtimeName ? `${instance.requested.runtimeName} · ` : ""}{instance.requested.modelLabel ?? "Default model"} #{instance.ordinal + 1}</strong>
         <p>{instance.preparation} · Submission: {instance.submissionOutcome} · Execution: {instance.executionOutcome}</p>
         <p>Setup: {instance.setup.status}{instance.setup.message ? ` · ${instance.setup.message}` : ""}</p>
         {instance.error && <p role="alert">{instance.error}</p>}
-        {instance.workspaceId && live && !live.has(instance.workspaceId) ? <p>Live workspace missing. Saved captures remain available.</p> : instance.threadId && instance.workspaceId ? <button className="ghost" type="button" onClick={() => onSelectInstance(instance.workspaceId!, instance.threadId!)}>Open thread</button> : <p>No recorded thread receipt.</p>}
-        {instance.threadId && <LaterCapture instance={instance} onError={setError} />}
+        {instance.sessionId && <button type="button" className="ghost" onClick={()=>onSelectRuntimeSession?.(instance.sessionId!)}>Open runtime conversation</button>}
+        {!instance.sessionId && (instance.workspaceId && live && !live.has(instance.workspaceId) ? <p>Live workspace missing. Saved captures remain available.</p> : instance.threadId && instance.workspaceId ? <button className="ghost" type="button" onClick={() => onSelectInstance(instance.workspaceId!, instance.threadId!)}>Open thread</button> : <p>No recorded thread receipt.</p>)}
+        {(instance.threadId || instance.sessionId) && <LaterCapture instance={instance} onError={setError} />}
       </div>)}
     </details>)}
     <div className="run-comparison-columns">{select("Left", leftId, setLeftId)}{select("Right", rightId, setRightId)}</div>
@@ -105,16 +106,16 @@ function LaterCapture({instance, onError}: {instance: RunInstance; onError: (err
   return <form onSubmit={async e => {
     e.preventDefault(); const turn = turnId.trim(); if (!turn) return;
     const receipt = request?.turn === turn ? request : {id: crypto.randomUUID(), turn}; setRequest(receipt); setBusy(true); onError(null);
-    try {await captureRunInstance(instance.id, turn, receipt.id, "Later turn");setSaved(true);setRequest(null);}
+    try {if(instance.sessionId) await runtimeRequest("capture",{instanceId:instance.id,executionId:turn,requestId:receipt.id,label:"Later execution"}); else await captureRunInstance(instance.id, turn, receipt.id, "Later turn");setSaved(true);setRequest(null);}
     catch (error) {onError(String(error));} finally {setBusy(false);}
   }}>
     <button className="ghost" type="button" disabled={busy} onClick={async () => {
       setBusy(true); onError(null);
-      try {const available = await listRunTurns(instance.id); setTurns(available); setTurnId(available.filter(t => t.id !== instance.initialTurnId).slice(-1)[0]?.id ?? "");}
+      try {const available = instance.sessionId ? (await runtimeRequest<{executions:{executionId:string;execution:string}[]}>("history",{sessionId:instance.sessionId})).executions.map(t=>({id:t.executionId,status:t.execution})) : await listRunTurns(instance.id); setTurns(available); setTurnId(available.filter(t => t.id !== (instance.initialExecutionId ?? instance.initialTurnId)).slice(-1)[0]?.id ?? "");}
       catch (error) {onError(String(error));} finally {setBusy(false);}
     }}>Choose a later turn</button>
     {turns.length > 0 && <label>Turn to capture<select value={turnId} onChange={e => {setTurnId(e.target.value);setSaved(false);}} disabled={busy}>
-      <option value="">Select a turn</option>{turns.map((turn, index) => <option key={turn.id} value={turn.id}>Turn {index + 1} · {turn.status}{turn.id === instance.initialTurnId ? " · initial result" : ""}</option>)}
+      <option value="">Select a turn</option>{turns.map((turn, index) => <option key={turn.id} value={turn.id}>Turn {index + 1} · {turn.status}{turn.id === (instance.initialExecutionId ?? instance.initialTurnId) ? " · initial result" : ""}</option>)}
     </select></label>}
     <button className="ghost" disabled={busy || !turnId.trim()}>Capture later turn</button>
     {saved && <span role="status">Capture saved. History refreshes automatically.</span>}
@@ -124,9 +125,9 @@ function Evidence({capture, instance, run, tab}: {capture: RunCapture; instance?
   return <article className="run-evidence" aria-label={`${capture.label} evidence`}>
     <h3>{capture.label}</h3><p>{capture.status} · {capture.complete ? "Complete turn evidence" : "Incomplete evidence"} · {new Date(capture.createdAt).toLocaleString()}</p>
     {capture.errors.map((error, index) => <p key={index}>{error}</p>)}
-    {tab === "Output" && (capture.items.filter(i => i.type === "agentMessage").map((i, index) => <pre key={index}>{String(i.text ?? "")}</pre>))}
+    {tab === "Output" && (capture.items.filter(i => i.type === "agentMessage" || (i.kind === "message" && i.role === "assistant")).map((i, index) => <pre key={index}>{String(i.text ?? "")}</pre>))}
     {tab === "Settings" && <><h4>Original input</h4><pre>{run?.prompt}</pre><h4>Requested settings</h4><pre>{pretty(instance?.requested)}</pre><h4>Submitted payload</h4><pre>{pretty(instance?.submission)}</pre><h4>Observed runtime metadata</h4><pre>{pretty(capture.observed)}</pre></>}
-    {tab === "Commands" && <><p>Command evidence comes from recorded tool items. Assistant claims are displayed under Output.</p>{capture.items.filter(i => i.type === "commandExecution").map((i, index) => <pre key={index}>{pretty({sourceItemId: i.id, command: i.command, exitCode: i.exitCode ?? "unavailable", status: i.status, output: i.aggregatedOutput ?? "unavailable"})}</pre>)}</>}
+    {tab === "Commands" && <><p>Command evidence comes from recorded tool items. Assistant claims are displayed under Output.</p>{capture.items.filter(i => i.type === "commandExecution" || i.kind === "tool").map((i, index) => <pre key={index}>{pretty({sourceItemId: i.id, command: i.command ?? i.title, rawInput: i.rawInput, nativeKind: i.nativeKind ?? i.kind, exitCode: i.exitCode ?? "unavailable", status: i.status, output: i.aggregatedOutput ?? i.content ?? "unavailable"})}</pre>)}</>}
     {tab === "Tokens" && <pre>{capture.usage ? pretty(capture.usage) : "Turn-attributable token usage unavailable"}</pre>}
     {tab === "Files" && <><h4>Turn-reported changes</h4><pre>{pretty(capture.items.filter(i => i.type === "fileChange"))}</pre><h4>Workspace state at capture</h4><p>May include setup, user, or other-process edits. This is not an atomic snapshot.</p><p>Base: {capture.git.baseOid ?? "unavailable"} · HEAD: {capture.git.headOid ?? "unavailable"}</p>
       {capture.git.concurrentChangeDetected && <p>Concurrent Git change detected</p>}

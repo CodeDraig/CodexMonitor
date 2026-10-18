@@ -1,0 +1,12 @@
+.agent-session-browser { display: flex; flex-direction: column; gap: 12px; max-height: 80vh; overflow: auto; }
+.agent-session-browser label, .acp-conversation-controls label { display: flex; gap: 8px; align-items: center; }
+.agent-session-browser ul { list-style: none; padding: 0; }
+.agent-session-browser li { border-bottom: 1px solid var(--border-subtle); padding: 12px 0; overflow-wrap: anywhere; }
+.acp-conversation-controls { pointer-events: auto; padding: 8px 16px; max-height: 25vh; overflow: auto; color: var(--text-secondary); font-size: 12px; }
+.acp-content img { max-width: 100%; max-height: 500px; object-fit: contain; }
+.acp-content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.thread-agent-label { color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+.agent-creation-dialog { display: flex; flex-direction: column; gap: 12px; width: min(460px, calc(100vw - 48px)); box-sizing: border-box; padding: 24px; max-height: 80vh; overflow: auto; }
+.agent-creation-dialog h2, .agent-creation-dialog p { margin: 0; }
+.agent-creation-directory { color: var(--text-secondary); overflow-wrap: anywhere; }

@@ -174,23 +174,7 @@ pub(super) async fn try_handle(
 
 impl DaemonState {
     pub(crate) async fn sync_workspaces_from_storage(&self) {
-        let stored = match read_workspaces(&self.storage_path) {
-            Ok(stored) => stored,
-            Err(err) => {
-                eprintln!(
-                    "daemon: failed to read workspaces from {}: {err}",
-                    self.storage_path.display()
-                );
-                return;
-            }
-        };
-        let workspace_ids: HashSet<String> = stored.keys().cloned().collect();
-        {
-            let mut workspaces = self.workspaces.lock().await;
-            *workspaces = stored;
-        }
-
-        workspaces_core::prune_workspace_sessions_core(&self.sessions, &workspace_ids).await;
+        if let Err(e)=workspaces_core::sync_workspaces_from_storage_core(&self.storage_path,&self.workspaces,&self.sessions).await {eprintln!("daemon: failed to refresh workspace registrations: {e}");}
     }
 
     pub(crate) async fn list_workspaces(&self) -> Vec<WorkspaceInfo> {

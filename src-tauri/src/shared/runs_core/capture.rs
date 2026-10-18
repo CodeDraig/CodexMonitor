@@ -156,6 +156,7 @@ pub(crate) fn assemble(
     }
     let complete = errors.is_empty();
     RunCapture {
+        execution_id: None,
         schema_version: 1,
         id: id(),
         instance_id: instance.id.clone(),

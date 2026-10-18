@@ -84,6 +84,8 @@ export default defineConfig(async () => ({
   },
   test: {
     environment: "node",
+    // Preserve these raw styles for the composer overlay hit-testing regression.
+    css: { include: [/\/styles\/(?:main|agent-conversations)\.css\?raw$/] },
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["src/test/vitest.setup.ts"],
   },

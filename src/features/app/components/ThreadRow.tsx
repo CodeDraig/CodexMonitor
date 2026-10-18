@@ -166,6 +166,7 @@ export function ThreadRow({
       <span className={`thread-status ${statusClass}`} aria-hidden />
       <div className="thread-content">
         <div className="thread-headline">
+          {thread.agentLabel&&<span className="thread-agent-label">{thread.agentLabel} · </span>}
           <span className="thread-name">{thread.name}</span>
         </div>
         {hasDetails && (

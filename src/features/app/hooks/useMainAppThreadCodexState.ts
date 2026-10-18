@@ -1,3 +1,4 @@
+import {isAcpConversation} from "@/features/runtime/conversationIdentity";
 import { useCallback, useMemo } from "react";
 import { setWorkspaceRuntimeCodexArgs } from "@services/tauri";
 import { buildCodexArgsOptions } from "@threads/utils/codexArgsProfiles";
@@ -46,7 +47,7 @@ export function useMainAppThreadCodexState({
 }: UseMainAppThreadCodexStateArgs) {
   const handleThreadCodexMetadataDetected = useCallback(
     (workspaceId: string, threadId: string, metadata: ThreadCodexMetadata) => {
-      if (!workspaceId || !threadId) {
+      if (!workspaceId || !threadId || isAcpConversation(threadId)) {
         return;
       }
 
