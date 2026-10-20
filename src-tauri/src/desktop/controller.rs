@@ -8,8 +8,9 @@ mod state;
 
 use self::actions::ControllerAction;
 use self::state::{
-    CodexControls, ControllerState, ConversationState, QueuedPrompt, ThreadSummary, WorkspaceState,
+    CodexControls, ControllerState, QueuedPrompt, ThreadSummary, WorkspaceState,
 };
+pub(crate) use self::state::ConversationState;
 use crate::client::contracts::{
     BackendError, BackendMessage, BackendRequest, BackendScope, CodexRequest, ConversationKey,
     ConversationRef, EventKind, RequestEnvelope, RuntimeMethod, RuntimeRequest, WorkspaceRequest,
@@ -59,12 +60,23 @@ enum Purpose {
     SlashFork { key: ConversationKey, rest: String },
     SlashNotice(ConversationKey, String),
     Configure(ConversationKey),
+    ClientRequests(ConversationKey),
+    ClientRequestResponse(ConversationKey, Value),
     Metadata(String),
     Receipt(ConversationKey, Uuid),
     HistoryOlder(ConversationKey),
     ResyncEvents(ConversationKey),
     ResyncRead(ConversationKey),
     ResyncExecution(ConversationKey, String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkspaceFilesChanged {
+    pub(crate) scope: BackendScope,
+    pub(crate) store_id: String,
+    pub(crate) session_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) paths: Vec<String>,
 }
 
 #[derive(Default)]
@@ -156,6 +168,7 @@ pub(crate) struct Controller {
     codex_resync_inflight: HashSet<ConversationKey>,
     misc_results: VecDeque<(Uuid, Result<Value, BackendError>)>,
     activity_completions: ActivityCompletions,
+    workspace_files_changed: VecDeque<WorkspaceFilesChanged>,
     visible: bool,
 }
 
@@ -185,6 +198,7 @@ impl Controller {
             codex_resync_inflight: HashSet::new(),
             misc_results: VecDeque::new(),
             activity_completions: ActivityCompletions::default(),
+            workspace_files_changed: VecDeque::new(),
             visible: true,
         }
     }
@@ -228,6 +242,7 @@ impl Controller {
             self.codex_resync_inflight.clear();
             self.misc_results.clear();
             self.activity_completions = ActivityCompletions::default();
+            self.workspace_files_changed.clear();
             self.resume_live_overlays.clear();
             self.history_restart_staging.clear();
             self.history_generation_retries.clear();
@@ -254,6 +269,10 @@ impl Controller {
     /// and sound effects. Duplicate native turn/execution IDs are suppressed.
     pub(crate) fn take_activity_completions(&mut self) -> Vec<ConversationKey> {
         self.activity_completions.drain()
+    }
+
+    pub(crate) fn take_workspace_files_changed(&mut self) -> Vec<WorkspaceFilesChanged> {
+        self.workspace_files_changed.drain(..).collect()
     }
 
     /// Bounded structural diagnostics; request parameters, prompt bodies,
@@ -349,6 +368,7 @@ impl Controller {
             let _ = self.handle(ControllerAction::Initialize);
         }
         if visible {
+            self.poll_selected_client_requests(now_ms);
             let can_refresh = self.state.selected_conversation().is_some_and(|c| {
                 !c.busy
                     && !c.awaiting_first_turn
@@ -368,6 +388,86 @@ impl Controller {
             }
         }
         count
+    }
+
+    fn poll_selected_client_requests(&mut self, now_ms: u64) {
+        let Some(key) = self.state.selected.clone() else {
+            return;
+        };
+        let ConversationRef::Acp { session_id, .. } = &key.conversation else {
+            return;
+        };
+        let Some(conversation) = self.state.conversations.get_mut(&key) else {
+            return;
+        };
+        if conversation.client_requests_pending
+            || (now_ms < conversation.client_requests_poll_due_ms
+                && !(conversation.client_requests_waiting && conversation.busy))
+        {
+            return;
+        }
+        conversation.client_requests_pending = true;
+        conversation.client_requests_poll_due_ms = now_ms.saturating_add(1_000);
+        conversation.client_requests_error = None;
+        if let Err(error) = self.send(
+            runtime(
+                RuntimeMethod::ConnectionStatus,
+                json!({"sessionId":session_id}),
+                false,
+            ),
+            Purpose::ClientRequests(key.clone()),
+        ) {
+            if let Some(conversation) = self.state.conversations.get_mut(&key) {
+                conversation.client_requests_pending = false;
+                conversation.client_requests_error = Some(error);
+            }
+        }
+    }
+
+    fn respond_client_request(
+        &mut self,
+        key: ConversationKey,
+        client_request_id: Value,
+        decision: Value,
+    ) -> Result<Uuid, String> {
+        if self.state.selected.as_ref() != Some(&key) || key.endpoint_id != self.scope.endpoint_id {
+            return Err("The selected ACP conversation changed before responding".into());
+        }
+        if !matches!(&key.conversation, ConversationRef::Acp { .. }) {
+            return Err("Client callback decisions are available only for ACP conversations".into());
+        }
+        let conversation = self
+            .state
+            .conversations
+            .get(&key)
+            .ok_or("The selected ACP conversation is unavailable")?;
+        let connection_id = conversation
+            .client_connection_id
+            .clone()
+            .ok_or("The ACP foreground connection is not available")?;
+        let generation = conversation
+            .client_connection_generation
+            .ok_or("The ACP foreground connection generation is unavailable")?;
+        if !conversation
+            .client_requests
+            .iter()
+            .any(|request| request["clientRequestId"] == client_request_id)
+        {
+            return Err("This ACP client request is no longer pending".into());
+        }
+        self.send(
+            runtime(
+                RuntimeMethod::RespondClientRequest,
+                json!({
+                    "connectionId":connection_id,
+                    "generation":generation,
+                    "clientRequestId":client_request_id,
+                    "decision":decision,
+                }),
+                true,
+            ),
+            Purpose::ClientRequestResponse(key, client_request_id),
+        )
     }
 
     pub(crate) fn handle(&mut self, action: ControllerAction) -> Result<Option<Uuid>, String> {
@@ -484,6 +584,7 @@ impl Controller {
             A::CreateConversation {
                 workspace_id,
                 profile_id,
+                prepared_connection,
             } => {
                 if let Some(profile_id) = profile_id {
                     let revision = self
@@ -492,7 +593,12 @@ impl Controller {
                         .iter()
                         .find(|p| p["id"].as_str() == Some(&profile_id))
                         .and_then(|p| p["revision"].as_i64());
-                    self.send(runtime(RuntimeMethod::CreateSession, json!({"workspaceId":workspace_id,"profileId":profile_id,"expectedProfileRevision":revision}), true), Purpose::CreateAcp(workspace_id)).map(Some)
+                    let mut params = json!({"workspaceId":workspace_id,"profileId":profile_id,"expectedProfileRevision":revision});
+                    if let Some((connection_id, generation)) = prepared_connection {
+                        params["connectionId"] = json!(connection_id);
+                        params["generation"] = json!(generation);
+                    }
+                    self.send(runtime(RuntimeMethod::CreateSession, params, true), Purpose::CreateAcp(workspace_id)).map(Some)
                 } else {
                     if self.workspace_connected(&workspace_id) {
                         self.start_codex_conversation(workspace_id).map(Some)
@@ -624,6 +730,7 @@ impl Controller {
             } => self.permission(request_id, option_id).map(Some),
             A::CodexUserInput { request_id, answers } => self.codex_user_input(request_id, answers).map(Some),
             A::CodexElicitation { workspace_id, request_id, result } => self.codex_elicitation(workspace_id, request_id, result).map(Some),
+            A::RespondClientRequest { key, client_request_id, decision } => self.respond_client_request(key, client_request_id, decision).map(Some),
             A::Configure { option_id, value } => self.configure(option_id, value).map(Some),
             A::SetConfigurationPopup(open) => {
                 if let Some(c) = self.state.selected_conversation_mut() {
@@ -2301,6 +2408,27 @@ impl Controller {
                 // to the normal idle path.
                 self.refresh_negotiated_session(key);
             }
+            Purpose::ClientRequests(key) => {
+                if let Some(conversation) = self.state.conversations.get_mut(&key) {
+                    conversation.client_requests_pending = false;
+                    conversation.client_requests_poll_due_ms = now_ms.saturating_add(1_000);
+                    conversation.client_connection_id = value["connectionId"].as_str().map(str::to_owned);
+                    conversation.client_connection_generation = value["generation"].as_u64();
+                    conversation.client_requests = value["pendingClientRequests"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    conversation.client_requests_waiting = false;
+                    conversation.client_requests_error = None;
+                }
+            }
+            Purpose::ClientRequestResponse(key, request_id) => {
+                if let Some(conversation) = self.state.conversations.get_mut(&key) {
+                    conversation.client_requests.retain(|request| request["clientRequestId"] != request_id);
+                    conversation.client_requests_poll_due_ms = 0;
+                    conversation.client_requests_error = None;
+                }
+            }
             Purpose::Metadata(session) => {
                 if let Some(old) = self
                     .state
@@ -2819,6 +2947,32 @@ impl Controller {
                     conversation.last_error = Some(message);
                 }
             }
+            Purpose::ClientRequests(key) => {
+                if let Some(conversation) = self.state.conversations.get_mut(&key) {
+                    conversation.client_requests_pending = false;
+                    let awaiting_foreground = error.code == "transport_lost"
+                        && error.message.contains("live ACP connection for Monitor session not found")
+                        && !conversation.busy;
+                    if awaiting_foreground {
+                        conversation.client_connection_id = None;
+                        conversation.client_connection_generation = None;
+                        conversation.client_requests.clear();
+                        conversation.client_requests_waiting = true;
+                        conversation.client_requests_error = None;
+                        conversation.client_requests_poll_due_ms = now_ms.saturating_add(30_000);
+                    } else {
+                        conversation.client_requests_waiting = false;
+                        conversation.client_requests_poll_due_ms = now_ms.saturating_add(2_000);
+                        conversation.client_requests_error = Some(message);
+                    }
+                }
+            }
+            Purpose::ClientRequestResponse(key, _) => {
+                if let Some(conversation) = self.state.conversations.get_mut(&key) {
+                    conversation.client_requests_error = Some(message);
+                    conversation.client_requests_poll_due_ms = 0;
+                }
+            }
             Purpose::Resume(key) => {
                 let resync_failed = self.codex_resync_inflight.remove(&key);
                 let first_turn_not_persisted =
@@ -2990,6 +3144,35 @@ impl Controller {
             return;
         }
         if from_resync && matches!(kind, "history_loaded" | "history_load_failed") {
+            return;
+        }
+        if kind == "workspace_files_changed" {
+            let Some(workspace_id) = payload["workspaceId"].as_str() else {
+                return;
+            };
+            // Require an existing Monitor association for this exact native
+            // session. A runtime event cannot redirect invalidation into a
+            // different workspace by supplying a workspace hint.
+            if runtime_event_workspace(&self.state, store, session, None).as_deref()
+                != Some(workspace_id)
+            {
+                return;
+            }
+            let paths = payload["payload"]["paths"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|path| is_workspace_relative_event_path(path))
+                .map(str::to_owned)
+                .collect();
+            self.workspace_files_changed.push_back(WorkspaceFilesChanged {
+                scope: self.scope.clone(),
+                store_id: store.to_owned(),
+                session_id: session.to_owned(),
+                workspace_id: workspace_id.to_owned(),
+                paths,
+            });
             return;
         }
         self.activity_completions
@@ -3353,6 +3536,17 @@ fn runtime_event_workspace(
                 .and_then(|row| row["workspaceId"].as_str().map(str::to_owned))
         })
 }
+
+fn is_workspace_relative_event_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.starts_with('\\')
+        && !path.as_bytes().get(1).is_some_and(|b| *b == b':')
+        && !path
+            .split(['/', '\\'])
+            .any(|component| component.is_empty() || component == "." || component == "..")
+}
+
 fn is_advertised(value: &Value) -> bool {
     value.as_bool() == Some(true)
         || value.is_object()
@@ -4165,6 +4359,158 @@ mod tests {
         assert!(!is_advertised(&json!([])));
     }
 
+    #[test]
+    fn selected_acp_client_callbacks_poll_and_respond_on_the_foreground_connection() {
+        let scope = BackendScope {
+            endpoint_id: "local".into(),
+            connection_epoch: 7,
+            store_id: Some("store".into()),
+        };
+        let (calls_tx, calls_rx) = mpsc::channel();
+        let backend = BackendHandle::spawn(HeldReplyDriver { calls: calls_tx }, scope.clone(), || {});
+        let mut controller = Controller::new(scope, backend);
+        let key = acp_key("local", "store", "agent-session");
+        controller.state.select(key.clone());
+        controller.state.initialized = true;
+
+        controller.tick(10, true, false);
+        let (request, status_reply) = next_backend_call(&calls_rx);
+        let BackendRequest::Runtime(status) = request else { panic!("expected ACP status poll") };
+        assert_eq!(status.method, RuntimeMethod::ConnectionStatus);
+        assert_eq!(status.params, json!({"sessionId":"agent-session"}));
+        status_reply.send(Ok(json!({
+            "connectionId":"foreground-connection",
+            "generation":12,
+            "pendingClientRequests":[{
+                "clientRequestId":"callback-1",
+                "kind":"url",
+                "url":"https://accounts.example.test/login"
+            }]
+        }))).unwrap();
+        for _ in 0..100 {
+            controller.tick(11, false, false);
+            if !controller.state.conversations[&key].client_requests_pending { break; }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let conversation = &controller.state.conversations[&key];
+        assert_eq!(conversation.client_connection_id.as_deref(), Some("foreground-connection"));
+        assert_eq!(conversation.client_connection_generation, Some(12));
+        assert_eq!(conversation.client_requests.len(), 1);
+
+        let codex_key = ConversationKey {
+            endpoint_id: "local".into(),
+            conversation: ConversationRef::Codex {
+                workspace_id: "workspace".into(),
+                thread_id: "codex-thread".into(),
+            },
+        };
+        controller.state.select(codex_key);
+        assert!(controller.handle(Action::RespondClientRequest {
+            key: key.clone(),
+            client_request_id: json!("callback-1"),
+            decision: json!({"action":"accept"}),
+        }).is_err());
+        assert!(calls_rx.try_recv().is_err(), "a stale ACP action must not route through Codex");
+        controller.state.select(key.clone());
+
+        controller.handle(Action::RespondClientRequest {
+            key: key.clone(),
+            client_request_id: json!("callback-1"),
+            decision: json!({"action":"accept"}),
+        }).unwrap();
+        let (request, _reply) = next_backend_call(&calls_rx);
+        let BackendRequest::Runtime(response) = request else { panic!("expected ACP callback response") };
+        assert_eq!(response.method, RuntimeMethod::RespondClientRequest);
+        assert_eq!(response.params, json!({
+            "connectionId":"foreground-connection",
+            "generation":12,
+            "clientRequestId":"callback-1",
+            "decision":{"action":"accept"}
+        }));
+    }
+
+    #[test]
+    fn workspace_file_change_event_is_scoped_and_keeps_only_safe_relative_paths() {
+        for endpoint in ["local", "remote:acceptance"] {
+            let scope = BackendScope {
+                endpoint_id: endpoint.into(),
+                connection_epoch: 4,
+                store_id: Some("store".into()),
+            };
+            let (calls_tx, _calls_rx) = mpsc::channel();
+            let backend = BackendHandle::spawn(HeldReplyDriver { calls: calls_tx }, scope.clone(), || {});
+            let mut controller = Controller::new(scope.clone(), backend);
+            controller.state.catalog.push(json!({
+                "storeId":"store","sessionId":"session","workspaceId":"workspace"
+            }));
+
+            let mut event = live_runtime_event(1, "workspace_files_changed", json!({
+                "paths":["src/main.rs", "../outside", "/etc/passwd", "C:\\secret", "nested/./bad"]
+            }));
+            event["workspaceId"] = json!("workspace");
+            controller.apply_event(event.clone(), 1);
+            let changes = controller.take_workspace_files_changed();
+            assert_eq!(changes.len(), 1, "event should be delivered for {endpoint}");
+            assert_eq!(changes[0].scope, scope);
+            assert_eq!(changes[0].store_id, "store");
+            assert_eq!(changes[0].session_id, "session");
+            assert_eq!(changes[0].workspace_id, "workspace");
+            assert_eq!(changes[0].paths, ["src/main.rs"]);
+
+            event["sequence"] = json!(2);
+            event["workspaceId"] = json!("other-workspace");
+            controller.apply_event(event, 2);
+            assert!(controller.take_workspace_files_changed().is_empty());
+        }
+    }
+
+    #[test]
+    fn cached_idle_missing_foreground_waits_without_auto_preparing_but_busy_loss_is_visible() {
+        let scope = BackendScope {
+            endpoint_id: "local".into(),
+            connection_epoch: 9,
+            store_id: Some("store".into()),
+        };
+        let (calls_tx, calls_rx) = mpsc::channel();
+        let backend = BackendHandle::spawn(HeldReplyDriver { calls: calls_tx }, scope.clone(), || {});
+        let mut controller = Controller::new(scope, backend);
+        let key = acp_key("local", "store", "session");
+        controller.state.initialized = true;
+        controller.state.select(key.clone());
+        let conversation = controller.state.conversations.entry(key.clone()).or_default();
+        conversation.client_connection_id = Some("stale-connection".into());
+        conversation.client_connection_generation = Some(7);
+        conversation.client_requests = vec![json!({"clientRequestId":"old"})];
+        let error = crate::client::BackendError {
+            code: "transport_lost".into(),
+            message: "live ACP connection for Monitor session not found".into(),
+        };
+        controller.apply_error(Purpose::ClientRequests(key.clone()), error.clone(), 1);
+        let idle = &controller.state.conversations[&key];
+        assert!(idle.client_requests_waiting);
+        assert!(idle.client_requests_error.is_none());
+        assert!(idle.client_connection_id.is_none());
+        assert!(idle.client_connection_generation.is_none());
+        assert!(idle.client_requests.is_empty());
+        assert_eq!(idle.client_requests_poll_due_ms, 30_001);
+        controller.tick(2, true, false);
+        assert!(calls_rx.try_recv().is_err(), "idle cached history must not auto-prepare a live connection");
+
+        controller.state.conversations.get_mut(&key).unwrap().busy = true;
+        controller.poll_selected_client_requests(3);
+        let (request, _reply) = next_backend_call(&calls_rx);
+        assert_eq!(request.rpc().method, "connection_status");
+        assert_eq!(request.rpc().params, json!({"sessionId":"session"}));
+        controller.apply_error(Purpose::ClientRequests(key.clone()), error, 3);
+        let busy = &controller.state.conversations[&key];
+        assert!(!busy.client_requests_waiting);
+        assert_eq!(
+            busy.client_requests_error.as_deref(),
+            Some("live ACP connection for Monitor session not found")
+        );
+        assert_eq!(busy.client_requests_poll_due_ms, 2_003);
+    }
+
     fn acp_key(endpoint: &str, store: &str, session: &str) -> ConversationKey {
         ConversationKey {
             endpoint_id: endpoint.into(),
@@ -4190,6 +4536,56 @@ mod tests {
         calls
             .recv_timeout(Duration::from_secs(2))
             .expect("backend request should be enqueued")
+    }
+
+    fn next_client_status_poll(
+        calls: &mpsc::Receiver<(BackendRequest, oneshot::Sender<Result<Value, String>>)>,
+        session_id: &str,
+    ) {
+        let (request, reply) = next_backend_call(calls);
+        let BackendRequest::Runtime(runtime) = request else {
+            panic!("expected ACP connection status poll")
+        };
+        assert_eq!(runtime.method, RuntimeMethod::ConnectionStatus);
+        assert_eq!(runtime.params, json!({"sessionId":session_id}));
+        reply
+            .send(Ok(json!({
+                "connectionId":"foreground-test-connection",
+                "generation":1,
+                "pendingClientRequests":[]
+            })))
+            .unwrap();
+    }
+
+    fn next_history_poll_with_status(
+        calls: &mpsc::Receiver<(BackendRequest, oneshot::Sender<Result<Value, String>>)>,
+        session_id: &str,
+    ) -> (BackendRequest, oneshot::Sender<Result<Value, String>>) {
+        let mut read = None;
+        let mut saw_status = false;
+        while read.is_none() || !saw_status {
+            let (request, reply) = next_backend_call(calls);
+            match &request {
+                BackendRequest::Runtime(runtime)
+                    if runtime.method == RuntimeMethod::ConnectionStatus =>
+                {
+                    assert_eq!(runtime.params, json!({"sessionId":session_id}));
+                    reply
+                        .send(Ok(json!({
+                            "connectionId":"foreground-test-connection",
+                            "generation":1,
+                            "pendingClientRequests":[]
+                        })))
+                        .unwrap();
+                    saw_status = true;
+                }
+                _ => {
+                    assert_eq!(request.rpc().method, "read_conversation");
+                    assert!(read.replace((request, reply)).is_none(), "unexpected duplicate history poll");
+                }
+            }
+        }
+        read.expect("history poll should be enqueued")
     }
 
     fn tick_until_backend_call(
@@ -4246,6 +4642,7 @@ mod tests {
         );
         assert!(controller.state.conversations[&key].configuration_pending);
         controller.tick(31_001, true, false);
+        next_client_status_poll(&calls_rx, "session");
         assert!(
             calls_rx.try_recv().is_err(),
             "idle refresh must defer while provider configuration is pending"
@@ -5077,7 +5474,7 @@ mod tests {
         // The 60-second notice is informational: the owner is still replaying,
         // so the read-only viewer continues bounded polling.
         controller.tick(60_000, true, false);
-        let (first_poll, first_reply) = next_backend_call(&calls_rx);
+        let (first_poll, first_reply) = next_history_poll_with_status(&calls_rx, "session");
         assert_eq!(first_poll.rpc().method, "read_conversation");
         first_reply
             .send(Ok(json!({
@@ -5109,7 +5506,7 @@ mod tests {
         }
 
         controller.tick(62_001, true, false);
-        let (completion_poll, completion_reply) = next_backend_call(&calls_rx);
+        let (completion_poll, completion_reply) = next_history_poll_with_status(&calls_rx, "session");
         assert_eq!(completion_poll.rpc().method, "read_conversation");
         completion_reply
             .send(Ok(json!({

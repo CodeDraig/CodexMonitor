@@ -41,7 +41,9 @@ pub(crate) struct RuntimeRegistry {
     connect_lock: Arc<Mutex<()>>,
     discovery: Arc<Mutex<HashMap<String, Arc<Mutex<Option<Discovery>>>>>>,
     pub owner: String,
+    pub connections: super::connections::ConnectionManager,
     faults: Arc<Mutex<HashMap<String, String>>>,
+    recorders: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 impl Default for RuntimeRegistry {
     fn default() -> Self {
@@ -50,6 +52,8 @@ impl Default for RuntimeRegistry {
             discovery: Default::default(),
             connect_lock: Default::default(),
             faults: Default::default(),
+            recorders: Default::default(),
+            connections: Default::default(),
             owner: format!("{}:{}", std::process::id(), runs_core::id()),
         }
     }
@@ -83,6 +87,9 @@ impl RuntimeRegistry {
         let settings = settings.lock().await;
         let mut default = RuntimeProfile {
             working_directory: None,
+            preset_id: None,
+            environment: Default::default(),
+            client_policy: Default::default(),
             id: "codex".into(),
             revision: 0,
             name: "Codex".into(),
@@ -108,6 +115,7 @@ impl RuntimeRegistry {
         workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
         settings: &Mutex<AppSettings>,
         sink: E,
+        prepared: Option<(String, u64)>,
     ) -> Result<RuntimeSession, String> {
         let _guard = self.connect_lock.lock().await;
         if let Some(ref previous) = existing {
@@ -144,18 +152,29 @@ impl RuntimeRegistry {
         };
         let handle = match profile.kind {
             RuntimeKind::OpenCodeAcp | RuntimeKind::Acp => {
-                let args = profile.launch_args();
-                let (client, mut wire) = AcpClient::spawn(
-                    &profile.executable,
-                    &args,
-                    profile
-                        .working_directory
-                        .as_deref()
-                        .unwrap_or(&workspace.path),
-                )
-                .await?;
+                let launch_dir = &workspace.path;
+                let (client, mut wire, callbacks, connection_id) =
+                    if let Some((id, generation)) = prepared {
+                        self.connections
+                            .take_prepared(&id, generation, &profile, launch_dir, false)
+                            .await?
+                    } else {
+                        self.connections
+                            .spawn_auto(
+                                path.clone(),
+                                profile.clone(),
+                                std::path::PathBuf::from(launch_dir),
+                                false,
+                            )
+                            .await?
+                    };
+                *callbacks.session_id.lock().await = Some(session.session_id.clone());
+                callbacks.set_workspace_change_events(events.clone()).await;
+                if let Some(old) = &existing {
+                    *callbacks.native_id.lock().await = Some(old.native_session_id.clone());
+                }
                 session.capabilities = acp_capabilities(&client.initialization);
-                session.agent_info = client.initialization.clone();
+                session.agent_info = acp_evidence_initialization(&client.initialization);
                 let response = if let Some(ref old) = existing {
                     if !session.capabilities.load_session {
                         client.stop().await;
@@ -199,6 +218,13 @@ impl RuntimeRegistry {
                     .map(|s| s.native_session_id.clone())
                     .or_else(|| response["sessionId"].as_str().map(str::to_string))
                     .ok_or("runtime_error: ACP session ID missing")?;
+                self.connections
+                    .bind(
+                        &connection_id,
+                        &session.session_id,
+                        &session.native_session_id,
+                    )
+                    .await?;
                 session.configuration = response.clone();
                 session.capabilities.configuration = configuration_available(&response);
                 let forward = events.clone();
@@ -259,6 +285,7 @@ impl RuntimeRegistry {
                     .ok_or("runtime_error: Codex thread ID missing")?
                     .into();
                 session.capabilities = RuntimeCapabilities {
+                    logout: false,
                     load_session: true,
                     session_discovery: true,
                     images: true,
@@ -315,12 +342,16 @@ impl RuntimeRegistry {
         let faults = self.faults.clone();
         let session_id = session.session_id.clone();
         let path_for_ready = path.clone();
-        tokio::spawn(async move {
+        let recorder = tokio::spawn(async move {
             if let Err(e) = drive(path, worker, rx, sink, owner).await {
                 faults.lock().await.insert(session_id, e.clone());
                 eprintln!("Runtime recording stopped: {e}");
             }
         });
+        self.recorders
+            .lock()
+            .await
+            .insert(session.session_id.clone(), recorder);
         // Preserve the existing load_session contract: submissions after its reply
         // see a committed replay. The additive history API returns its ticket earlier.
         if existing.is_some() && session.profile.is_acp() {
@@ -532,6 +563,7 @@ impl RuntimeRegistry {
     }
     pub async fn cancel(&self, id: &str) -> Result<(), String> {
         let b = self.binding(id).await?;
+        self.connections.cancel_terminals(id).await?;
         for (key, p) in b.permissions.lock().await.drain() {
             let _ = key;
             answer(&b, &p, None).await?;
@@ -690,10 +722,59 @@ impl RuntimeRegistry {
                     .remove(&b.session.native_session_id);
             }
         }
+        self.connections.close_session(id).await?;
+        if matches!(&b.handle, RuntimeHandle::OpenCodeAcp(_)) {
+            if let Some(recorder) = self.recorders.lock().await.remove(id) {
+                recorder
+                    .await
+                    .map_err(|error| format!("runtime_error: ACP recording shutdown: {error}"))?;
+            }
+            self.check_recording(id).await?;
+        }
         self.bindings.lock().await.remove(id);
         let sid = id.to_string();
         let owner = self.owner.clone();
         persist(path, move |s| s.release_runtime_owner(&sid, &owner)).await
+    }
+
+    /// Stop this host's ACP resources and commit their final evidence before
+    /// its runtime exits. Remote clients never invoke this on a daemon merely
+    /// because a desktop window closes.
+    pub async fn shutdown(&self, path: PathBuf) -> Result<(), String> {
+        let _guard = self.connect_lock.lock().await;
+        let bindings: Vec<_> = self
+            .bindings
+            .lock()
+            .await
+            .values()
+            .filter(|binding| matches!(&binding.handle, RuntimeHandle::OpenCodeAcp(_)))
+            .cloned()
+            .collect();
+        let mut failure = self.connections.shutdown().await.err();
+        for binding in bindings {
+            let sid = binding.session.session_id.clone();
+            if let Some(recorder) = self.recorders.lock().await.remove(&sid) {
+                if let Err(error) = recorder.await {
+                    failure.get_or_insert_with(|| {
+                        format!("runtime_error: ACP recording shutdown: {error}")
+                    });
+                }
+            }
+            if let Some(error) = self.faults.lock().await.get(&sid).cloned() {
+                failure.get_or_insert(error);
+            }
+            let owner = self.owner.clone();
+            let saved = sid.clone();
+            if let Err(error) = persist(path.clone(), move |store| {
+                store.release_runtime_owner(&saved, &owner)
+            })
+            .await
+            {
+                failure.get_or_insert(error);
+            }
+            self.bindings.lock().await.remove(&sid);
+        }
+        failure.map_or(Ok(()), Err)
     }
 }
 fn validate_prompt(input: &SubmitExecution, session: &RuntimeSession) -> Result<(), String> {
@@ -762,6 +843,16 @@ async fn drive<E: EventSink>(
     let mut cancel_requested = false;
     while let Some(mut raw) = rx.recv().await {
         let method = raw["method"].as_str().unwrap_or("").to_string();
+        if method == "runtime/workspace_files_changed" {
+            sink.emit_runtime_event(json!({
+                "kind":"workspace_files_changed",
+                "storeId":b.session.store_id,
+                "sessionId":b.session.session_id,
+                "workspaceId":b.session.workspace_id,
+                "payload":{"paths":raw["params"]["paths"]}
+            }));
+            continue;
+        }
         if method == "runtime/begin" {
             active =
                 Some(serde_json::from_value(raw["params"].clone()).map_err(|e| e.to_string())?);
@@ -1133,8 +1224,21 @@ pub(crate) fn acp_capabilities(init: &Value) -> RuntimeCapabilities {
         embedded_context: c["promptCapabilities"]["embeddedContext"] == true,
         cancellation: true,
         permissions: true,
+        logout: init
+            .pointer("/agentCapabilities/auth/logout")
+            .is_some_and(|v| !v.is_null() && v != &json!(false)),
         ..Default::default()
     }
+}
+
+/// Login descriptors may carry one-use environment values or arguments. They
+/// belong to transient connection status, never conversation/run provenance.
+pub(super) fn acp_evidence_initialization(init: &Value) -> Value {
+    let mut evidence = init.clone();
+    if let Some(object) = evidence.as_object_mut() {
+        object.remove("authMethods");
+    }
+    evidence
 }
 impl RuntimeRegistry {
     pub async fn discover(
@@ -1143,6 +1247,7 @@ impl RuntimeRegistry {
         profile: RuntimeProfile,
         cwd: Option<String>,
         cursor: Option<String>,
+        prepared: Option<(String, u64)>,
     ) -> Result<Value, String> {
         if !profile.is_acp() {
             return Err("unsupported: use the Codex thread browser".into());
@@ -1173,8 +1278,20 @@ impl RuntimeRegistry {
                         .to_string_lossy()
                         .into()
                 });
-            let (client, mut events) =
-                AcpClient::spawn(&profile.executable, &profile.launch_args(), &launch_dir).await?;
+            let (client, mut events, _, _) = if let Some((id, generation)) = prepared {
+                self.connections
+                    .take_prepared(&id, generation, &profile, &launch_dir, true)
+                    .await?
+            } else {
+                self.connections
+                    .spawn_auto(
+                        path.clone(),
+                        profile.clone(),
+                        std::path::PathBuf::from(&launch_dir),
+                        true,
+                    )
+                    .await?
+            };
             // Discovery is isolated from prompt/load connections and never restores a session.
             tokio::spawn(async move { while events.recv().await.is_some() {} });
             *discovery = Some(Discovery {
@@ -1240,6 +1357,7 @@ impl RuntimeRegistry {
         session: RuntimeSession,
         request: String,
         sink: E,
+        prepared: Option<(String, u64)>,
     ) -> Result<HistoryLoad, String> {
         if !session.profile.is_acp() {
             return Err("unsupported: Codex history uses its native thread adapter".into());
@@ -1267,7 +1385,7 @@ impl RuntimeRegistry {
         let load = ticket.clone();
         tokio::spawn(async move {
             if let Err(e) = registry
-                .replay(path.clone(), session, load.clone(), sink)
+                .replay(path.clone(), session, load.clone(), sink, prepared)
                 .await
             {
                 let _ = persist(path, move |s| s.finish_history_load(&load.id, Some(&e), 0)).await;
@@ -1281,6 +1399,7 @@ impl RuntimeRegistry {
         mut session: RuntimeSession,
         load: HistoryLoad,
         sink: E,
+        prepared: Option<(String, u64)>,
     ) -> Result<(), String> {
         let existing = {
             let mut bindings = self.bindings.lock().await;
@@ -1295,16 +1414,29 @@ impl RuntimeRegistry {
         let b = if let Some(b) = existing {
             b
         } else {
-            let (client, rx) = AcpClient::spawn(
-                &session.profile.executable,
-                &session.profile.launch_args(),
-                session
-                    .profile
-                    .working_directory
-                    .as_deref()
-                    .unwrap_or(&session.cwd),
-            )
-            .await?;
+            let launch_dir = &session.cwd;
+            let (client, rx, callbacks, connection_id) = if let Some((id, generation)) = prepared {
+                self.connections
+                    .take_prepared(&id, generation, &session.profile, launch_dir, false)
+                    .await?
+            } else {
+                self.connections
+                    .spawn_auto(
+                        path.clone(),
+                        session.profile.clone(),
+                        std::path::PathBuf::from(launch_dir),
+                        false,
+                    )
+                    .await?
+            };
+            *callbacks.session_id.lock().await = Some(session.session_id.clone());
+            self.connections
+                .bind(
+                    &connection_id,
+                    &session.session_id,
+                    &session.native_session_id,
+                )
+                .await?;
             let cached_configuration = session.configuration.clone();
             let cached_configuration_available = session.capabilities.configuration
                 || configuration_available(&cached_configuration);
@@ -1313,7 +1445,7 @@ impl RuntimeRegistry {
             // persisted by an earlier successful load if this replay later fails.
             session.configuration = cached_configuration;
             session.capabilities.configuration = cached_configuration_available;
-            session.agent_info = client.initialization.clone();
+            session.agent_info = acp_evidence_initialization(&client.initialization);
             let saved = session.clone();
             persist(path.clone(), move |s| s.save_runtime_session(&saved)).await?;
             let (events, drive_rx) = mpsc::unbounded_channel();
@@ -1342,11 +1474,15 @@ impl RuntimeRegistry {
             let owner = self.owner.clone();
             let faults = self.faults.clone();
             let sid = session.session_id.clone();
-            tokio::spawn(async move {
+            let recorder = tokio::spawn(async move {
                 if let Err(e) = drive(work_path, worker, drive_rx, sink, owner).await {
                     faults.lock().await.insert(sid, e);
                 }
             });
+            self.recorders
+                .lock()
+                .await
+                .insert(session.session_id.clone(), recorder);
             b
         };
         let client = match &b.handle {

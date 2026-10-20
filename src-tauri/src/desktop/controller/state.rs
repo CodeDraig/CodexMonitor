@@ -124,6 +124,15 @@ pub(crate) struct ConversationState {
     pub session: Option<Value>,
     pub permissions: Vec<Value>,
     pub user_input_requests: Vec<Value>,
+    /// Client callbacks requested by the currently bound ACP foreground client.
+    /// These are distinct from agent permission requests and user-input elicitation.
+    pub client_requests: Vec<Value>,
+    pub client_connection_id: Option<String>,
+    pub client_connection_generation: Option<u64>,
+    pub client_requests_pending: bool,
+    pub client_requests_waiting: bool,
+    pub client_requests_poll_due_ms: u64,
+    pub client_requests_error: Option<String>,
 }
 
 impl ConversationState {
@@ -174,6 +183,13 @@ impl ConversationState {
             session: self.session.clone(),
             permissions: self.permissions.clone(),
             user_input_requests: self.user_input_requests.clone(),
+            client_requests: self.client_requests.clone(),
+            client_connection_id: self.client_connection_id.clone(),
+            client_connection_generation: self.client_connection_generation,
+            client_requests_pending: self.client_requests_pending,
+            client_requests_waiting: self.client_requests_waiting,
+            client_requests_poll_due_ms: self.client_requests_poll_due_ms,
+            client_requests_error: self.client_requests_error.clone(),
         }
     }
 }

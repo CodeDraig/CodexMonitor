@@ -2,11 +2,11 @@ use crate::events::DaemonEvent;
 use crate::events::DaemonEventSink;
 use crate::shared::host_core::{CoreState, HostPaths};
 use config::{parse_args, usage, DaemonConfig};
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::sync::broadcast;
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
+use tokio::net::TcpListener;
+use tokio::sync::{broadcast, watch};
 
 #[allow(dead_code)]
 #[path = "../backend/mod.rs"]
@@ -76,6 +76,51 @@ mod files {
 
 const MAX_IN_FLIGHT_RPC_PER_CONNECTION: usize = 32;
 const DAEMON_NAME: &str = "codex-monitor-daemon";
+static SHUTDOWN_TX: OnceLock<watch::Sender<bool>> = OnceLock::new();
+
+pub(crate) fn schedule_daemon_shutdown() {
+    let Some(shutdown_tx) = SHUTDOWN_TX.get().cloned() else {
+        return;
+    };
+    // Let the RPC response task enqueue its acknowledged result before the
+    // accept loop exits and drops the current-thread runtime.
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        shutdown_tx.send_replace(true);
+    });
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut terminate = match signal(SignalKind::terminate()) {
+            Ok(signal) => Some(signal),
+            Err(error) => {
+                eprintln!("failed to install SIGTERM handler: {error}");
+                None
+            }
+        };
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if let Err(error) = result {
+                    eprintln!("failed to wait for SIGINT: {error}");
+                }
+            }
+            _ = async {
+                if let Some(signal) = terminate.as_mut() {
+                    let _ = signal.recv().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {}
+        }
+    }
+    #[cfg(not(unix))]
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        eprintln!("failed to wait for shutdown signal: {error}");
+    }
+}
 
 struct DaemonState {
     core: CoreState,
@@ -133,6 +178,8 @@ fn main() {
         .expect("failed to build tokio runtime");
 
     runtime.block_on(async move {
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let _ = SHUTDOWN_TX.set(shutdown_tx);
         let (events_tx, _events_rx) = broadcast::channel::<DaemonEvent>(2048);
         let paths = match HostPaths::from_data_dir(config.data_dir.clone()) {
             Ok(paths) => paths,
@@ -171,17 +218,34 @@ fn main() {
                 .display()
         );
 
+        let shutdown_signal = wait_for_shutdown_signal();
+        tokio::pin!(shutdown_signal);
         loop {
-            match listener.accept().await {
-                Ok((socket, _addr)) => {
-                    let config = Arc::clone(&config);
-                    let state = Arc::clone(&state);
-                    let events = events_tx.clone();
-                    tokio::spawn(async move {
-                        transport::handle_client(socket, config, state, events).await;
-                    });
+            tokio::select! {
+                accepted = listener.accept() => {
+                    match accepted {
+                        Ok((socket, _addr)) => {
+                            let config = Arc::clone(&config);
+                            let state = Arc::clone(&state);
+                            let events = events_tx.clone();
+                            tokio::spawn(async move {
+                                transport::handle_client(socket, config, state, events).await;
+                            });
+                        }
+                        Err(_) => continue,
+                    }
                 }
-                Err(_) => continue,
+                _ = &mut shutdown_signal => {
+                    if let Err(error) = state.runtime_registry.shutdown(state.event_sink.run_store_path.clone()).await {
+                        eprintln!("failed to shut down ACP runtimes cleanly: {error}");
+                    }
+                    break;
+                }
+                changed = shutdown_rx.changed() => {
+                    if changed.is_ok() && *shutdown_rx.borrow() {
+                        break;
+                    }
+                }
             }
         }
     });

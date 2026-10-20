@@ -13,11 +13,14 @@ pub(super) async fn try_handle(
         "ping" => Some(Ok(json!({ "ok": true }))),
         "daemon_info" => Some(Ok(state.daemon_info())),
         "daemon_shutdown" => {
-            tokio::spawn(async {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                std::process::exit(0);
-            });
-            Some(Ok(json!({ "ok": true })))
+            let result = state
+                .runtime_registry
+                .shutdown(state.event_sink.run_store_path.clone())
+                .await;
+            if result.is_ok() {
+                crate::schedule_daemon_shutdown();
+            }
+            Some(result.map(|_| json!({ "ok": true })))
         }
         "menu_set_accelerators" => {
             let updates: Vec<Value> = match params {

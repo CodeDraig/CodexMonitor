@@ -53,6 +53,10 @@ import {
   generateAgentDescription,
   writeAgentConfigToml,
   writeAgentMd,
+  prepareRuntimeConnection,
+  respondAcpClientRequest,
+  readAcpLoginTerminal,
+  closeRuntimeConnection,
 } from "./tauri";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -97,6 +101,22 @@ describe("tauri invoke wrappers", () => {
     expect(invokeMock).toHaveBeenCalledWith("add_workspace", {
       path: "/tmp/project",
     });
+  });
+
+  it("routes ACP authentication and client callback operations through the selected backend RPC",async()=>{
+    const invokeMock=vi.mocked(invoke);
+    invokeMock.mockResolvedValueOnce({operationId:"op",connectionId:"conn",generation:2,state:"pending"});
+    await prepareRuntimeConnection({profileId:"claude",expectedProfileRevision:4,cwd:"/work",role:"authentication",requestId:"req-1"});
+    expect(invokeMock).toHaveBeenLastCalledWith("runtime_request",{method:"prepare_connection",input:{profileId:"claude",expectedProfileRevision:4,cwd:"/work",role:"authentication",requestId:"req-1"}});
+    invokeMock.mockResolvedValueOnce(undefined);
+    await respondAcpClientRequest({connectionId:"conn",generation:2,clientRequestId:7,decision:{action:"allow_once"}});
+    expect(invokeMock).toHaveBeenLastCalledWith("runtime_request",{method:"respond_client_request",input:{connectionId:"conn",generation:2,clientRequestId:7,decision:{action:"allow_once"}}});
+    invokeMock.mockResolvedValueOnce({output:"login> ",nextCursor:9,truncated:false,state:"running"});
+    await readAcpLoginTerminal({connectionId:"conn",generation:2,operationId:"login",cursor:4,limit:1024});
+    expect(invokeMock).toHaveBeenLastCalledWith("runtime_request",{method:"read_login_terminal",input:{connectionId:"conn",generation:2,operationId:"login",cursor:4,limit:1024}});
+    invokeMock.mockResolvedValueOnce(undefined);
+    await closeRuntimeConnection({connectionId:"conn",generation:2});
+    expect(invokeMock).toHaveBeenLastCalledWith("runtime_request",{method:"close_connection",input:{connectionId:"conn",generation:2}});
   });
 
   it("returns an empty list when workspace picker is cancelled", async () => {

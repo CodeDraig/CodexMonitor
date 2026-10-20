@@ -188,15 +188,26 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(error)?;
-        let sid: String = tx
+        let (sid, state): (String, String) = tx
             .query_row(
-                "SELECT session_id FROM history_loads WHERE id=? AND state='loading'",
+                "SELECT session_id,state FROM history_loads WHERE id=?",
                 [load],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()
             .map_err(error)?
             .ok_or("invalid_input: history load is not active")?;
+        let target = if failure.is_some() { "failed" } else { "complete" };
+        if state != "loading" {
+            // The request waiter and ordered response barrier may both report
+            // the same failure. Keep its first committed result without
+            // stopping the journal reader or replacing the previous snapshot.
+            if state == target {
+                tx.commit().map_err(error)?;
+                return Ok(());
+            }
+            return Err("invalid_input: history load completion conflicts".into());
+        }
         if failure.is_none() {
             tx.execute("INSERT INTO conversation_snapshots VALUES(?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET generation=excluded.generation,through_sequence=excluded.through_sequence,loaded_at=excluded.loaded_at",params![sid,load,sequence as i64,now()]).map_err(error)?;
         }

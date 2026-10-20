@@ -24,6 +24,25 @@ fn string(v: &Value, key: &str) -> Result<String, String> {
 fn encode(v: impl serde::Serialize) -> Result<Value, String> {
     serde_json::to_value(v).map_err(|e| e.to_string())
 }
+fn prepared_reference(input: &Value) -> Result<Option<(String, u64)>, String> {
+    if input.get("connectionId").is_none_or(Value::is_null)
+        && input.get("generation").is_none_or(Value::is_null) {
+        return Ok(None);
+    }
+    let id = string(input, "connectionId")?;
+    let generation = input["generation"].as_u64().filter(|generation| *generation > 0)
+        .ok_or("invalid_input: prepared connection requires a positive generation")?;
+    Ok(Some((id, generation)))
+}
+#[cfg(test)]
+#[test]
+fn prepared_connection_reference_requires_both_identity_and_generation() {
+    assert_eq!(prepared_reference(&json!({})).unwrap(), None);
+    assert!(prepared_reference(&json!({"connectionId":"connection"})).is_err());
+    assert!(prepared_reference(&json!({"generation":1})).is_err());
+    assert!(prepared_reference(&json!({"connectionId":"connection","generation":0})).is_err());
+    assert_eq!(prepared_reference(&json!({"connectionId":"connection","generation":2})).unwrap(), Some(("connection".into(),2)));
+}
 pub(crate) async fn dispatch<E: EventSink>(
     method: &str,
     input: Value,
@@ -35,10 +54,168 @@ pub(crate) async fn dispatch<E: EventSink>(
     sink: E,
 ) -> Result<Value, String> {
     match method {
+        "prepare_connection" => {
+            match input["role"].as_str() {
+                Some("conversation" | "discovery") => {},
+                _ => return Err("invalid_input: connection role must be conversation or discovery".into()),
+            }
+            let id = string(&input, "profileId")?;
+            let profile = registry
+                .profiles(path.clone(), settings)
+                .await?
+                .into_iter()
+                .find(|p| p.id == id && p.is_acp())
+                .ok_or("invalid_input: ACP profile not found")?;
+            if input["expectedProfileRevision"].as_u64() != Some(profile.revision) {
+                return Err("revision_conflict: runtime profile changed".into());
+            }
+            let cwd = input["cwd"]
+                .as_str()
+                .or(profile.working_directory.as_deref())
+                .ok_or("invalid_input: prepare_connection requires an absolute directory")?;
+            let cwd = std::path::PathBuf::from(cwd);
+            if !cwd.is_absolute() {
+                return Err("invalid_input: connection directory must be absolute".into());
+            }
+            let cwd = cwd
+                .canonicalize()
+                .map_err(|e| format!("invalid_input: connection directory unavailable: {e}"))?;
+            let session = input["sessionId"].as_str().map(str::to_owned);
+            if let Some(sid) = &session {
+                if input["role"] == "discovery" {
+                    return Err(
+                        "invalid_input: discovery authentication cannot claim a conversation"
+                            .into(),
+                    );
+                }
+                let saved_id = sid.clone();
+                let saved = with_store(path.clone(), move |s| s.runtime_session(&saved_id)).await?;
+                if saved.profile.connection_scope() != profile.connection_scope()
+                    || !saved.profile.is_acp()
+                {
+                    return Err(
+                        "invalid_input: connection profile does not match the saved conversation"
+                            .into(),
+                    );
+                }
+                let saved_cwd = std::path::Path::new(&saved.cwd)
+                    .canonicalize()
+                    .map_err(|e| format!("invalid_input: saved conversation directory: {e}"))?;
+                if saved_cwd != cwd {
+                    return Err(
+                        "invalid_input: connection directory does not match the saved conversation"
+                            .into(),
+                    );
+                }
+                let sid = sid.clone();
+                let owner = registry.owner.clone();
+                with_store(path.clone(), move |s| {
+                    s.check_runtime_session_available(&sid, &owner)
+                })
+                .await?;
+            }
+            registry
+                .connections
+                .prepare(
+                    path,
+                    profile,
+                    cwd,
+                    session,
+                    input["role"] == "discovery",
+                    string(&input, "requestId")?,
+                )
+                .await
+        }
+        "close_connection" => {
+            registry
+                .connections
+                .close_prepared_connection(
+                    &string(&input, "connectionId")?,
+                    input["generation"]
+                        .as_u64()
+                        .ok_or("invalid_input: generation required")?,
+                )
+                .await
+        }
+        "connection_status" => {
+            if input["connectionId"].is_string() {
+                registry.connections.status(&string(&input, "connectionId")?).await
+            } else {
+                registry.connections.status_for_session(&string(&input, "sessionId")?).await
+            }
+        }
+        "connection_operation" => {
+            registry
+                .connections
+                .operation(&string(&input, "operationId")?)
+                .await
+        }
+        "authenticate" => {
+            registry
+                .connections
+                .authenticate(
+                    &string(&input, "connectionId")?,
+                    input["generation"]
+                        .as_u64()
+                        .ok_or("invalid_input: generation required")?,
+                    &string(&input, "methodId")?,
+                    string(&input, "requestId")?,
+                )
+                .await
+        }
+        "cancel_connection_operation" => {
+            registry
+                .connections
+                .cancel_operation(
+                    &string(&input, "operationId")?,
+                    input["generation"]
+                        .as_u64()
+                        .ok_or("invalid_input: generation required")?,
+                )
+                .await
+        }
+        "logout" => {
+            registry
+                .connections
+                .logout(
+                    &string(&input, "connectionId")?,
+                    input["generation"]
+                        .as_u64()
+                        .ok_or("invalid_input: generation required")?,
+                )
+                .await
+        }
+        "respond_client_request" => {
+            registry
+                .connections
+                .respond(
+                    &string(&input, "connectionId")?,
+                    input["generation"]
+                        .as_u64()
+                        .ok_or("invalid_input: generation required")?,
+                    &input["clientRequestId"],
+                    input["decision"].clone(),
+                )
+                .await
+        }
+        "read_login_terminal"
+        | "write_login_terminal"
+        | "resize_login_terminal"
+        | "close_login_terminal" => registry.connections.login_call(method, &input).await,
+        "read_acp_terminal" => {
+            registry
+                .connections
+                .read_terminal(
+                    path,
+                    &string(&input, "sessionId")?,
+                    &string(&input, "terminalId")?,
+                )
+                .await
+        }
         "profiles" => {
             let profiles = registry.profiles(path.clone(), settings).await?;
             let info = with_store(path, |s| Ok(s.runtime_store_info())).await?;
-            Ok(json!({"profiles":profiles,"storeId":info["storeId"],"schemaVersion":3}))
+            Ok(json!({"profiles":profiles,"storeId":info["storeId"],"schemaVersion":4}))
         }
         "catalog" => with_store(path, |s| s.catalog()).await.and_then(encode),
         "discover_sessions" => {
@@ -55,6 +232,7 @@ pub(crate) async fn dispatch<E: EventSink>(
                     profile,
                     input["cwd"].as_str().map(str::to_string),
                     input["cursor"].as_str().map(str::to_string),
+                    prepared_reference(&input)?,
                 )
                 .await
         }
@@ -73,12 +251,17 @@ pub(crate) async fn dispatch<E: EventSink>(
             }
             // Probe on an independent connection: opening by ID must not disturb
             // an active prompt, nor register an unrestorable external session.
-            let (client, _events) = crate::backend::acp::AcpClient::spawn(
-                &profile.executable, &profile.launch_args(),
-                profile.working_directory.as_deref().unwrap_or(&cwd),
-            ).await?;
-            let supported = super::agent_runtime::registry::acp_capabilities(&client.initialization).load_session;
-            client.stop().await;
+            let (client, _events, _callbacks, connection_id) = registry
+                .connections
+                .spawn_auto(path.clone(), profile.clone(), PathBuf::from(&cwd), true)
+                .await?;
+            let supported =
+                super::agent_runtime::registry::acp_capabilities(&client.initialization)
+                    .load_session;
+            registry
+                .connections
+                .close_connection(&connection_id, 1)
+                .await?;
             if !supported {
                 return Err("unsupported: this agent cannot load existing sessions by ID".into());
             }
@@ -154,7 +337,13 @@ pub(crate) async fn dispatch<E: EventSink>(
             uuid::Uuid::parse_str(&request).map_err(|e| format!("invalid_input: {e}"))?;
             let session = with_store(path.clone(), move |s| s.runtime_session(&sid)).await?;
             registry
-                .load_conversation(path, session, request, sink)
+                .load_conversation(
+                    path,
+                    session,
+                    request,
+                    sink,
+                    prepared_reference(&input)?,
+                )
                 .await
                 .and_then(encode)
         }
@@ -246,7 +435,15 @@ pub(crate) async fn dispatch<E: EventSink>(
             encode(
                 registry
                     .create_session(
-                        path, workspace, profile, existing, sessions, workspaces, settings, sink,
+                        path,
+                        workspace,
+                        profile,
+                        existing,
+                        sessions,
+                        workspaces,
+                        settings,
+                        sink,
+                        prepared_reference(&input)?,
                     )
                     .await?,
             )

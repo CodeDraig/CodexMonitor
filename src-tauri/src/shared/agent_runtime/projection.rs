@@ -112,3 +112,36 @@ pub(crate) fn capture_items(events: &[super::types::RuntimeEvent]) -> Vec<Value>
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_tool_patch_keeps_nested_terminal_content_for_live_and_replay() {
+        let terminal_content = json!([{"type":"terminal","terminalId":"terminal-42"}]);
+        let raw = json!({
+            "method":"session/update",
+            "params":{"update":{
+                "sessionUpdate":"tool_call_update",
+                "toolCallId":"tool-42",
+                "kind":"execute",
+                "content":terminal_content.clone()
+            }}
+        });
+
+        // Live updates and replay both pass through normalize, then the same
+        // patch reducer. Keep the opaque nested ACP block intact in either path.
+        let (live_kind, mut live) = normalize(&RuntimeKind::Acp, &raw);
+        let (replay_kind, replay) = normalize(&RuntimeKind::Acp, &raw);
+        assert_eq!(live_kind, "tool_patch");
+        assert_eq!(replay_kind, "tool_patch");
+        assert_eq!(live["content"], terminal_content);
+        patch(
+            &mut live,
+            &json!({"toolCallId":"tool-42","status":"completed"}),
+        );
+        assert_eq!(live["content"][0]["terminalId"], "terminal-42");
+        assert_eq!(replay["content"][0]["terminalId"], "terminal-42");
+    }
+}

@@ -1,6 +1,7 @@
 //! Native composition root. Controllers own transitions; panels emit effects.
 
 mod attachments;
+mod acp_connections;
 mod browser;
 mod codex_controls;
 mod composer;
@@ -22,9 +23,9 @@ mod workspace_dialogs;
 
 use super::{
     content::{ContentAction, ConversationView},
-    controller::{Action, Controller},
+    controller::{Action, Controller, WorkspaceFilesChanged},
     platform::{HostAction, HostResultValue, PlatformService, WindowState},
-    workbench::{PanelEffect, Workbench, WorkbenchPanel},
+    workbench::{workspace_relative_event_matches, PanelEffect, Workbench, WorkbenchPanel},
 };
 use crate::{
     client::{self, contracts::*},
@@ -154,6 +155,40 @@ enum BackgroundResult {
     UiSaved(Result<(), String>),
 }
 
+#[derive(Clone, Debug)]
+struct PendingFileRead {
+    workspace_id: String,
+    path: String,
+    generation: u64,
+}
+
+fn preview_refresh_for_change(
+    change: &WorkspaceFilesChanged,
+    target: Option<&(String, String)>,
+    workspace_path: &str,
+) -> Option<(String, String)> {
+    let (workspace_id, preview_path) = target?;
+    if workspace_id != &change.workspace_id
+        || !change.paths.iter().any(|path| {
+            workspace_relative_event_matches(path, preview_path, workspace_path)
+        })
+    {
+        return None;
+    }
+    Some((workspace_id.clone(), preview_path.clone()))
+}
+
+fn file_read_is_current(
+    pending: &PendingFileRead,
+    generation: u64,
+    target: Option<&(String, String)>,
+) -> bool {
+    pending.generation == generation
+        && target.is_some_and(|target| {
+            target.0 == pending.workspace_id && target.1 == pending.path
+        })
+}
+
 pub(super) struct NativeApp {
     controller: Controller,
     core: Arc<CoreState>,
@@ -171,6 +206,7 @@ pub(super) struct NativeApp {
     browser_search: String,
     browser_profile: Option<String>,
     profile_editor: Option<browser::ProfileEditor>,
+    acp_connections: acp_connections::AcpConnections,
     open_id_profile: String,
     open_id_native: String,
     open_id_cwd: String,
@@ -180,6 +216,13 @@ pub(super) struct NativeApp {
     attachments: HashMap<ConversationKey, Vec<Value>>,
     host_pending: HashMap<Uuid, HostPurpose>,
     attachment_pending: HashMap<Uuid, (String, String)>,
+    acp_terminal_open: Option<(String, String)>,
+    acp_terminal_pending: HashMap<Uuid, String>,
+    acp_terminal_output: String,
+    acp_terminal_truncated: bool,
+    acp_terminal_finished: bool,
+    acp_terminal_exit: Option<String>,
+    acp_terminal_next_poll_ms: u64,
     background_tx: mpsc::Sender<BackgroundResult>,
     background_rx: mpsc::Receiver<BackgroundResult>,
     connection_epoch: u64,
@@ -188,7 +231,9 @@ pub(super) struct NativeApp {
     presentation_dirty: bool,
     notices: Vec<String>,
     file_preview: Option<(String, String, String)>,
-    file_pending: HashMap<Uuid, (String, String)>,
+    file_preview_target: Option<(String, String)>,
+    file_preview_generation: u64,
+    file_pending: HashMap<Uuid, PendingFileRead>,
     open_in_path: Option<PathBuf>,
     user_input_answers: HashMap<String, String>,
     draft_revisions: HashMap<ConversationKey, u64>,
@@ -271,6 +316,7 @@ impl NativeApp {
             browser_search: String::new(),
             browser_profile: None,
             profile_editor: None,
+            acp_connections: acp_connections::AcpConnections::default(),
             open_id_profile: String::new(),
             open_id_native: String::new(),
             open_id_cwd: String::new(),
@@ -280,6 +326,13 @@ impl NativeApp {
             attachments: HashMap::new(),
             host_pending: HashMap::new(),
             attachment_pending: HashMap::new(),
+            acp_terminal_open: None,
+            acp_terminal_pending: HashMap::new(),
+            acp_terminal_output: String::new(),
+            acp_terminal_truncated: false,
+            acp_terminal_finished: false,
+            acp_terminal_exit: None,
+            acp_terminal_next_poll_ms: 0,
             background_tx,
             background_rx,
             connection_epoch: 1,
@@ -288,6 +341,8 @@ impl NativeApp {
             presentation_dirty: false,
             notices: Vec::new(),
             file_preview: None,
+            file_preview_target: None,
+            file_preview_generation: 0,
             file_pending: HashMap::new(),
             open_in_path: None,
             user_input_answers: HashMap::new(),
@@ -460,6 +515,8 @@ impl NativeApp {
                 self.open_id_cwd.clear();
                 self.workspace_dialogs = workspace_dialogs::WorkspaceDialogs::default();
                 self.file_preview = None;
+                self.file_preview_target = None;
+                self.file_preview_generation = self.file_preview_generation.wrapping_add(1);
                 self.open_in_path = None;
                 self.user_input_answers.clear();
                 self.workbench = Workbench::default();
@@ -595,6 +652,31 @@ impl NativeApp {
         let scope = self.controller.scope().clone();
         let mut updated_settings = None;
         for (id, result) in self.controller.take_misc_results() {
+            if let Some(_terminal_id) = self.acp_terminal_pending.remove(&id) {
+                match result {
+                    Ok(value) => {
+                        self.acp_terminal_output = value["output"].as_str().unwrap_or_default().to_owned();
+                        self.acp_terminal_truncated = value["truncated"].as_bool().unwrap_or(false);
+                        self.acp_terminal_finished = value["released"].as_bool().unwrap_or(false)
+                            || !value["exitCode"].is_null() || !value["signal"].is_null();
+                        self.acp_terminal_exit = if !value["exitCode"].is_null() || !value["signal"].is_null() {
+                            Some(format!("exitCode={} signal={}", value["exitCode"], value["signal"]))
+                        } else if value["released"].as_bool() == Some(true) { Some("released".into()) } else { None };
+                        self.acp_terminal_next_poll_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64 + 1000;
+                    }
+                    Err(error) => {
+                        self.acp_terminal_output.push_str(&format!("\n[terminal read failed: {}]", error.message));
+                        self.acp_terminal_next_poll_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64 + 1000;
+                    }
+                }
+                continue;
+            }
+            if self.acp_connections.apply_result(id, result.clone(), &mut self.controller) {
+                continue;
+            }
             if self.suggestions.apply_result(id, result.clone()) {
                 continue;
             }
@@ -651,12 +733,19 @@ impl NativeApp {
                     }
                     Err(error) => self.notices.push(error.message),
                 }
-            } else if let Some((workspace, path)) = self.file_pending.remove(&id) {
+            } else if let Some(pending) = self.file_pending.remove(&id) {
+                if !file_read_is_current(
+                    &pending,
+                    self.file_preview_generation,
+                    self.file_preview_target.as_ref(),
+                ) {
+                    continue;
+                }
                 match result {
                     Ok(value) => {
                         self.file_preview = Some((
-                            workspace,
-                            path,
+                            pending.workspace_id,
+                            pending.path,
                             value["content"]
                                 .as_str()
                                 .or_else(|| value["text"].as_str())
@@ -845,6 +934,62 @@ impl NativeApp {
             }
         }
     }
+
+    fn request_file_preview(&mut self, workspace_id: String, path: String) {
+        self.file_preview_generation = self.file_preview_generation.wrapping_add(1);
+        let generation = self.file_preview_generation;
+        self.file_preview_target = Some((workspace_id.clone(), path.clone()));
+        let request = BackendRequest::Files(FilesRequest::read(
+            "read_workspace_file",
+            json!({"workspaceId":workspace_id,"path":path,"maxBytes":1048576}),
+        ));
+        match self.controller.request(request) {
+            Ok(id) => {
+                self.file_pending.insert(
+                    id,
+                    PendingFileRead {
+                        workspace_id,
+                        path,
+                        generation,
+                    },
+                );
+            }
+            Err(error) => self
+                .notices
+                .push(format!("Could not refresh workspace file preview: {error:?}")),
+        }
+    }
+
+    fn consume_workspace_file_changes(&mut self) {
+        for change in self.controller.take_workspace_files_changed() {
+            if change.scope != *self.controller.scope() {
+                continue;
+            }
+            let workspace_path = self
+                .controller
+                .state
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == change.workspace_id)
+                .map(|workspace| workspace.path.as_str())
+                .unwrap_or_default()
+                .to_owned();
+            self.workbench.mark_workspace_files_changed(
+                &change.workspace_id,
+                &workspace_path,
+                &change.paths,
+            );
+            if let Some((workspace_id, preview_path)) =
+                preview_refresh_for_change(
+                    &change,
+                    self.file_preview_target.as_ref(),
+                    &workspace_path,
+                )
+            {
+                self.request_file_preview(workspace_id, preview_path);
+            }
+        }
+    }
     fn decode_media(
         &self,
         identity: String,
@@ -1021,8 +1166,9 @@ impl NativeApp {
                 for action in response.actions{match action{
                     ContentAction::Quote{text,..}=>{let draft=self.controller.state.selected_conversation().map(|c|c.draft.clone()).unwrap_or_default();self.act(Action::SetDraft(format!("{draft}{}{}",if draft.is_empty(){""}else{"\n\n"},text)));},
                     ContentAction::OpenLink{url}=>self.host(HostAction::OpenUrl{url},None),
-                    ContentAction::OpenFile{path}=>{let workspace_id=match &key.conversation{ConversationRef::Codex{workspace_id,..}|ConversationRef::Acp{workspace_id,..}=>workspace_id};let request=BackendRequest::Files(FilesRequest::read("read_workspace_file",json!({"workspaceId":workspace_id,"path":path,"maxBytes":1048576})));if let Ok(id)=self.controller.request(request){self.file_pending.insert(id,(workspace_id.clone(),path));}},
+                    ContentAction::OpenFile{path}=>{let workspace_id=match &key.conversation{ConversationRef::Codex{workspace_id,..}|ConversationRef::Acp{workspace_id,..}=>workspace_id.clone()};self.request_file_preview(workspace_id,path);},
                     ContentAction::LoadAttachment{id}=>if let ConversationRef::Acp{session_id,..}=&key.conversation{if !self.attachment_pending.values().any(|pending|pending==&(identity.clone(),id.clone())){if let Ok(request)=self.controller.request(BackendRequest::Runtime(RuntimeRequest::read(RuntimeMethod::ReadConversationAttachment,json!({"sessionId":session_id,"attachmentId":id})))){self.attachment_pending.insert(request,(identity.clone(),id));}}},
+                    ContentAction::ReadAcpTerminal{terminal_id}=>if let ConversationRef::Acp{session_id,..}=&key.conversation{self.acp_terminal_open=Some((session_id.clone(),terminal_id.clone()));self.acp_terminal_output.clear();self.acp_terminal_truncated=false;self.acp_terminal_finished=false;self.acp_terminal_exit=None;self.request_acp_terminal(session_id, &terminal_id);},
                     ContentAction::LoadInlineAttachment{id,mime,data}=>self.decode_media(identity.clone(),id,mime,data,&ctx),
                     ContentAction::LoadWorkspaceAttachment{id,path}=>{
                         let workspace_id=match &key.conversation{ConversationRef::Codex{workspace_id,..}|ConversationRef::Acp{workspace_id,..}=>workspace_id};
@@ -1100,6 +1246,7 @@ impl eframe::App for NativeApp {
             .selected_conversation()
             .map(|c| c.history_revision);
         self.controller.tick(now, visible, self.popup_open);
+        self.consume_workspace_file_changes();
         let next_history = self
             .controller
             .state
@@ -1303,6 +1450,10 @@ impl eframe::App for NativeApp {
         self.show_browser(&ctx);
         self.show_agent_chooser(&ctx);
         self.show_profile_editor(&ctx);
+        self.show_acp_terminal(&ctx);
+        let mut acp_connections = std::mem::take(&mut self.acp_connections);
+        acp_connections.show(self, &ctx);
+        self.acp_connections = acp_connections;
         self.show_diagnostics(ui);
         if let Some(workspace_id) = self.selected_workspace.clone() {
             let forms = self
@@ -1414,6 +1565,8 @@ impl eframe::App for NativeApp {
                 });
             if !open {
                 self.file_preview = None;
+                self.file_preview_target = None;
+                self.file_preview_generation = self.file_preview_generation.wrapping_add(1);
             }
         }
         if let Some(error) = self.controller.state.error.clone() {
@@ -1457,6 +1610,16 @@ impl eframe::App for NativeApp {
         }
         for terminal in self.terminals.values_mut() {
             terminal.close_all();
+        }
+        // The local core may still own ACP clients even when the selected UI
+        // backend is remote. Shut down only this process-local registry; the
+        // managed daemon has its own exit path.
+        let runtime_shutdown = self
+            .runtime
+            .handle
+            .block_on(self.core.runtime_registry.shutdown(self.paths.run_store_path.clone()));
+        if let Err(error) = runtime_shutdown {
+            eprintln!("Local ACP runtime shutdown did not complete cleanly: {error}");
         }
     }
 }
@@ -1687,6 +1850,83 @@ mod header_layout_tests {
     fn backend_and_host_controls_remain_visible_and_clickable_in_header_layout() {
         verify_header_at_width(700.0, true);
         verify_header_at_width(1200.0, false);
+    }
+}
+
+#[cfg(test)]
+mod workspace_file_change_tests {
+    use super::{file_read_is_current, preview_refresh_for_change, PendingFileRead};
+    use crate::{client::BackendScope, desktop::controller::WorkspaceFilesChanged};
+
+    fn change(workspace: &str, paths: &[&str]) -> WorkspaceFilesChanged {
+        WorkspaceFilesChanged {
+            scope: BackendScope {
+                endpoint_id: "local".into(),
+                connection_epoch: 3,
+                store_id: Some("store".into()),
+            },
+            store_id: "store".into(),
+            session_id: "session".into(),
+            workspace_id: workspace.into(),
+            paths: paths.iter().map(|path| (*path).into()).collect(),
+        }
+    }
+
+    #[test]
+    fn only_matching_open_workspace_path_requests_preview_refresh() {
+        let target = Some(("workspace-a".into(), "src/main.rs".into()));
+        assert_eq!(
+            preview_refresh_for_change(&change("workspace-a", &["src/main.rs"]), target.as_ref(), "/work/repo"),
+            target
+        );
+        assert_eq!(
+            preview_refresh_for_change(&change("workspace-a", &["src/other.rs"]), target.as_ref(), "/work/repo"),
+            None
+        );
+        assert_eq!(
+            preview_refresh_for_change(&change("workspace-b", &["src/main.rs"]), target.as_ref(), "/work/repo"),
+            None
+        );
+        assert_eq!(
+            preview_refresh_for_change(&change("workspace-a", &[]), target.as_ref(), "/work/repo"),
+            None,
+            "additional-root writes invalidate panels but cannot target a workspace preview"
+        );
+    }
+
+    #[test]
+    fn absolute_file_uri_refresh_matches_reported_workspace_but_not_another_root() {
+        let target = Some(("workspace-a".into(), "file:///work/repo/src/main%20file.rs".into()));
+        assert_eq!(
+            preview_refresh_for_change(
+                &change("workspace-a", &["src/main file.rs"]),
+                target.as_ref(),
+                "/work/repo",
+            ),
+            target
+        );
+        assert_eq!(
+            preview_refresh_for_change(
+                &change("workspace-a", &["src/main file.rs"]),
+                Some(&("workspace-a".into(), "/work/other/src/main file.rs".into())),
+                "/work/repo",
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn stale_preview_read_cannot_replace_a_newer_target_or_generation() {
+        let target = Some(("workspace-a".into(), "src/main.rs".into()));
+        let pending = PendingFileRead {
+            workspace_id: "workspace-a".into(),
+            path: "src/main.rs".into(),
+            generation: 5,
+        };
+        assert!(file_read_is_current(&pending, 5, target.as_ref()));
+        assert!(!file_read_is_current(&pending, 6, target.as_ref()));
+        assert!(!file_read_is_current(&pending, 5, Some(&("workspace-a".into(), "README.md".into()))));
+        assert!(!file_read_is_current(&pending, 5, None));
     }
 }
 

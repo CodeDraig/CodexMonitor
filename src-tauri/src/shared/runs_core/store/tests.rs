@@ -370,7 +370,7 @@ fn synchronized_concurrent_first_opens_initialize_empty_and_migrate_seeded_store
         assert_eq!(opened.len(), OPENERS);
         assert!(opened
             .iter()
-            .all(|(_, version, integrity)| { *version == 3 && integrity == "ok" }));
+            .all(|(_, version, integrity)| { *version == 4 && integrity == "ok" }));
         assert!(opened
             .iter()
             .all(|(store_id, _, _)| store_id == &opened[0].0));
@@ -460,7 +460,7 @@ fn synchronized_concurrent_first_opens_initialize_empty_and_migrate_seeded_store
     assert_eq!(opened.len(), OPENERS);
     assert!(opened
         .iter()
-        .all(|(_, version, integrity)| { *version == 3 && integrity == "ok" }));
+        .all(|(_, version, integrity)| { *version == 4 && integrity == "ok" }));
     assert!(opened
         .iter()
         .all(|(opened_id, _, _)| opened_id == &store_id));

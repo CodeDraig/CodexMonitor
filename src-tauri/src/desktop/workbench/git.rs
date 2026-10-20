@@ -277,6 +277,10 @@ impl GitPanel {
     pub(crate) fn mark_stale(&mut self) {
         self.stale = true;
     }
+    #[cfg(test)]
+    pub(crate) fn is_stale(&self) -> bool {
+        self.stale
+    }
     pub(crate) fn show(
         &mut self,
         ui: &mut Ui,

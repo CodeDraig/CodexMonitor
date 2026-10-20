@@ -1,12 +1,14 @@
 //! Two independent registries and protocol readers contend with comparison updates.
 #![cfg(unix)]
 use super::{
+    client_store::{AcpCallbackState, AcpTerminalSnapshot},
     registry::persist,
     tests::{dir, runtime, Fixture},
     types::*,
 };
 use crate::shared::runs_core::{self, capture, store::Store, types::*};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     os::unix::fs::PermissionsExt,
     path::PathBuf,
@@ -33,7 +35,7 @@ fn mixed_runtime_worker() {
  let registered=crate::shared::workspaces_core::register_workspace_core(&imported.to_string_lossy(),None,&f.workspaces,&root.join("workspaces.json")).await.unwrap();
  let mut replay_tickets=Vec::new();
  let mut tickets=vec![first.clone()];f.terminal(&first).await;
- let mut receipts=Vec::new();let mut n=0;
+ let mut receipts=Vec::new();let mut callback_receipts=Vec::new();let mut terminal_receipts=Vec::new();let mut n=0;
  while start.elapsed()<Duration::from_secs(62){
   let marker=format!("{role}:{n}");
   let ticket=f.submit(&session,&marker,None).await;f.terminal(&ticket).await;tickets.push(ticket);
@@ -46,11 +48,22 @@ fn mixed_runtime_worker() {
   let duplicate=f.rpc("load_conversation_history",json!({"sessionId":replay["sessionId"],"requestId":request})).await.unwrap();assert_eq!(load["id"],duplicate["id"]);
   loop {let view=f.rpc("read_conversation",json!({"sessionId":replay["sessionId"]})).await.unwrap();if view["load"]["state"]=="complete"{assert_eq!(view["generation"],load["id"]);assert_eq!(view["items"].as_array().unwrap().len(),1);break;}tokio::time::sleep(Duration::from_millis(10)).await;}
   replay_tickets.push(load);
+  // Exercise schema-4 callback journaling and terminal snapshots through the
+  // same desktop/daemon-shared SQLite file while the existing runtime writes
+  // and pinned-reader lock are active.
+  let callback_connection=format!("stress-{role}");let callback_generation=1u64;let callback_request=json!(n);let callback_session=session["sessionId"].as_str().unwrap().to_string();let callback_method="terminal/kill".to_string();let callback_params_hash=format!("{:x}",Sha256::digest(marker.as_bytes()));
+  let connection_for_begin=callback_connection.clone();let session_for_begin=callback_session.clone();let method_for_begin=callback_method.clone();let hash_for_begin=callback_params_hash.clone();let request_for_begin=callback_request.clone();
+  let (operation,created)=persist(f.path.clone(),move|s|s.begin_acp_callback(&connection_for_begin,callback_generation,&request_for_begin,Some(&session_for_begin),&method_for_begin,&hash_for_begin)).await.unwrap();assert!(created,"each stress callback must create one durable intent");
+  let callback_result=json!({"acknowledgedMarker":marker});let result_for_finish=callback_result.clone();let operation_id=operation.id.clone();
+  let terminal_id=format!("stress-terminal-{role}-{n}");let terminal_snapshot=AcpTerminalSnapshot{session_id:callback_session.clone(),generation:callback_generation,terminal_id:terminal_id.clone(),payload:json!({"output":format!("{marker}\n"),"released":true,"exitCode":0,"truncated":false})};let snapshot_for_save=terminal_snapshot.clone();
+  let finished=persist(f.path.clone(),move|s|{let finished=s.finish_acp_callback(&operation_id,Some(&result_for_finish),None)?;s.save_acp_terminal_snapshot(&snapshot_for_save)?;Ok(finished)}).await.unwrap();assert_eq!(finished.state,AcpCallbackState::Succeeded);assert_eq!(finished.result,Some(callback_result.clone()));
+  callback_receipts.push(json!({"operationId":operation.id,"requestId":callback_request,"marker":marker,"state":"succeeded","result":callback_result}));
+  terminal_receipts.push(json!({"sessionId":terminal_snapshot.session_id,"generation":terminal_snapshot.generation,"terminalId":terminal_snapshot.terminal_id,"payload":terminal_snapshot.payload,"marker":marker}));
   n+=1;tokio::time::sleep(Duration::from_millis(80)).await;
  }
  let sid=session["sessionId"].as_str().unwrap().to_string();
  let mut all=Vec::new();let mut cursor=0;loop{let page=f.rpc("events",json!({"sessionId":sid,"after":cursor})).await.unwrap();let page=page.as_array().unwrap();if page.is_empty(){break}cursor=page.last().unwrap()["sequence"].as_u64().unwrap();all.extend(page.clone());}
- let result=json!({"session":session,"tickets":tickets,"receipts":receipts,"events":all,"registeredWorkspace":registered,"replaySession":replay,"replayTickets":replay_tickets,"elapsedMs":start.elapsed().as_millis()});std::fs::write(root.join(format!("{role}.result.json")),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+ let result=json!({"session":session,"tickets":tickets,"receipts":receipts,"callbackReceipts":callback_receipts,"terminalReceipts":terminal_receipts,"events":all,"registeredWorkspace":registered,"replaySession":replay,"replayTickets":replay_tickets,"elapsedMs":start.elapsed().as_millis()});std::fs::write(root.join(format!("{role}.result.json")),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
  f.rpc("disconnect",json!({"sessionId":sid})).await.unwrap();f.rpc("disconnect",json!({"sessionId":replay["sessionId"]})).await.unwrap();
  for c in f.sessions.lock().await.values(){crate::shared::process_core::kill_child_process_tree(&mut *c.child.lock().await).await;}
  });
@@ -62,7 +75,11 @@ fn sustained_mixed_runtime_writers_preserve_events_captures_and_notes() {
     let mut f = Fixture::new();
     f.path = root.join("runs.sqlite3");
     let mut store = Store::open(&f.path).unwrap();
-    let profile = RuntimeProfile { working_directory: None,
+    let profile = RuntimeProfile {
+        working_directory: None,
+        preset_id: None,
+        environment: Default::default(),
+        client_policy: Default::default(),
         id: "fixture".into(),
         revision: 0,
         name: "Fixture".into(),
@@ -184,6 +201,8 @@ fn sustained_mixed_runtime_writers_preserve_events_captures_and_notes() {
     let store = Store::open(&f.path).unwrap();
     let comparison = &store.comparisons(None, Some(&captures[0].id)).unwrap()[0];
     let mut receipt_count = 0;
+    let mut callback_count = 0;
+    let mut terminal_receipt_count = 0;
     for role in ["desktop", "daemon"] {
         let result: Value = serde_json::from_slice(
             &std::fs::read(root.join(format!("{role}.result.json"))).unwrap(),
@@ -203,15 +222,94 @@ fn sustained_mixed_runtime_writers_preserve_events_captures_and_notes() {
             );
             receipt_count += 1;
         }
-        let registered=crate::storage::read_workspaces(&root.join("workspaces.json")).unwrap();
-        let imported=result["registeredWorkspace"]["id"].as_str().unwrap();assert!(registered.contains_key(imported));assert_eq!(registered[imported].settings.codex_auto_connect,Some(false));
-        let replay_sid=result["replaySession"]["sessionId"].as_str().unwrap();
-        let loads=result["replayTickets"].as_array().unwrap();assert!(loads.len()>100);
-        for load in loads {
-            let saved=store.history_load(load["requestId"].as_str().unwrap()).unwrap().unwrap();assert_eq!(saved.state,"complete");assert_eq!(saved.id,load["id"]);
-            let count:i64=store.conn.query_row("SELECT COUNT(*) FROM conversation_items WHERE session_id=? AND generation=?",rusqlite::params![replay_sid,saved.id],|r|r.get(0)).unwrap();assert_eq!(count,1);
+        let callbacks = result["callbackReceipts"].as_array().unwrap();
+        assert!(
+            callbacks.len() > 100,
+            "{} callback intents acknowledged",
+            role
+        );
+        for receipt in callbacks {
+            assert_eq!(receipt["state"], "succeeded");
+            let marker = receipt["marker"].as_str().unwrap();
+            assert_eq!(receipt["result"]["acknowledgedMarker"], marker);
+            let saved = store
+                .acp_callback_operation(receipt["operationId"].as_str().unwrap())
+                .unwrap()
+                .expect("acknowledged callback must survive reopening the shared store");
+            assert_eq!(saved.state, AcpCallbackState::Succeeded);
+            assert_eq!(saved.request_id, receipt["requestId"]);
+            assert_eq!(saved.result.as_ref().unwrap()["acknowledgedMarker"], marker);
+            assert_eq!(
+                saved.session_id.as_deref(),
+                result["session"]["sessionId"].as_str()
+            );
+            callback_count += 1;
         }
-        let cached=store.conversation_read(replay_sid,None,0,200,"unowned-reader").unwrap();assert_eq!(cached["generation"],loads.last().unwrap()["id"]);assert_eq!(cached["items"].as_array().unwrap().len(),1);
+        let terminals = result["terminalReceipts"].as_array().unwrap();
+        assert!(
+            terminals.len() > 100,
+            "{} terminal snapshots acknowledged",
+            role
+        );
+        for receipt in terminals {
+            let marker = receipt["marker"].as_str().unwrap();
+            assert_eq!(receipt["payload"]["output"], format!("{marker}\n"));
+            let saved = store
+                .read_acp_terminal_snapshot(
+                    receipt["sessionId"].as_str().unwrap(),
+                    receipt["generation"].as_u64().unwrap(),
+                    receipt["terminalId"].as_str().unwrap(),
+                )
+                .unwrap()
+                .expect("acknowledged terminal snapshot must survive reopening the shared store");
+            assert_eq!(saved.payload, receipt["payload"]);
+            terminal_receipt_count += 1;
+        }
+        let latest_terminal = terminals.last().unwrap();
+        let saved_terminal = store
+            .read_latest_acp_terminal_snapshot(
+                latest_terminal["sessionId"].as_str().unwrap(),
+                latest_terminal["terminalId"].as_str().unwrap(),
+            )
+            .unwrap()
+            .expect("latest terminal snapshot must survive reopening the shared store");
+        assert_eq!(
+            saved_terminal.generation,
+            latest_terminal["generation"].as_u64().unwrap()
+        );
+        assert_eq!(saved_terminal.payload, latest_terminal["payload"]);
+        let registered = crate::storage::read_workspaces(&root.join("workspaces.json")).unwrap();
+        let imported = result["registeredWorkspace"]["id"].as_str().unwrap();
+        assert!(registered.contains_key(imported));
+        assert_eq!(
+            registered[imported].settings.codex_auto_connect,
+            Some(false)
+        );
+        let replay_sid = result["replaySession"]["sessionId"].as_str().unwrap();
+        let loads = result["replayTickets"].as_array().unwrap();
+        assert!(loads.len() > 100);
+        for load in loads {
+            let saved = store
+                .history_load(load["requestId"].as_str().unwrap())
+                .unwrap()
+                .unwrap();
+            assert_eq!(saved.state, "complete");
+            assert_eq!(saved.id, load["id"]);
+            let count: i64 = store
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM conversation_items WHERE session_id=? AND generation=?",
+                    rusqlite::params![replay_sid, saved.id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+        let cached = store
+            .conversation_read(replay_sid, None, 0, 200, "unowned-reader")
+            .unwrap();
+        assert_eq!(cached["generation"], loads.last().unwrap()["id"]);
+        assert_eq!(cached["items"].as_array().unwrap().len(), 1);
         let sid = result["session"]["sessionId"].as_str().unwrap();
         let history = store.runtime_history(sid).unwrap();
         assert_eq!(history.len(), result["tickets"].as_array().unwrap().len());
@@ -244,6 +342,33 @@ fn sustained_mixed_runtime_writers_preserve_events_captures_and_notes() {
             .any(|v| v["text"] == "slow initial evidence"));
     }
     assert_eq!(comparison.revision, receipt_count);
+    let saved_callback_count: i64 = store
+        .conn
+        .query_row("SELECT COUNT(*) FROM acp_callback_operations", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(saved_callback_count as usize, callback_count);
+    let successful_callback_count: i64 = store
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM acp_callback_operations WHERE state='succeeded'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(successful_callback_count as usize, callback_count);
+    let saved_terminal_count: i64 = store
+        .conn
+        .query_row("SELECT COUNT(*) FROM acp_terminal_snapshots", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        saved_terminal_count as usize, terminal_receipt_count,
+        "every acknowledged terminal snapshot remains available"
+    );
+    assert_eq!(terminal_receipt_count, callback_count);
     let integrity: String = store
         .conn
         .query_row("PRAGMA integrity_check", [], |r| r.get(0))

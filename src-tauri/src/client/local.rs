@@ -1149,7 +1149,7 @@ mod tests {
                 )))
                 .await
                 .unwrap();
-            assert_eq!(result["schemaVersion"], 3);
+            assert_eq!(result["schemaVersion"], 4);
             assert!(result["profiles"].is_array());
             std::fs::remove_dir_all(data).unwrap();
         });

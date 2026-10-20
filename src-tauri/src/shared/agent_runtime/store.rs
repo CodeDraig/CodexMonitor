@@ -48,7 +48,12 @@ impl Store {
                 "invalid_input: profile needs a name, executable and non-reserved ID".into(),
             );
         }
-        if p.working_directory.as_deref().is_some_and(|d|!std::path::Path::new(d).is_absolute()) {return Err("invalid_input: launch directory must be absolute".into());}
+        if p.working_directory
+            .as_deref()
+            .is_some_and(|d| !std::path::Path::new(d).is_absolute())
+        {
+            return Err("invalid_input: launch directory must be absolute".into());
+        }
         if p.kind == RuntimeKind::Codex {
             return Err(
                 "unsupported: configure the default Codex profile in Codex settings".into(),
@@ -114,6 +119,26 @@ impl Store {
             )
             .map_err(error)?;
         self.catalog_binding(s)?;
+        Ok(())
+    }
+    /// Authentication setup may inspect an idle conversation without reserving
+    /// execution ownership. The real handoff still claims it transactionally.
+    pub fn check_runtime_session_available(&self, session: &str, owner: &str) -> Result<()> {
+        let (previous, active): (Option<String>, Option<String>) = self
+            .conn
+            .query_row(
+                "SELECT owner,active_execution FROM runtime_sessions WHERE id=?",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(error)?;
+        if active.is_some()
+            || previous
+                .as_deref()
+                .is_some_and(|previous| previous != owner && !owner_is_dead(previous))
+        {
+            return Err("runtime_busy: session is active or owned by another backend; reconnect to its owner".into());
+        }
         Ok(())
     }
     pub fn claim_runtime_session(&mut self, session: &str, owner: &str) -> Result<()> {
@@ -260,8 +285,16 @@ impl Store {
             )
             .map_err(error)?;
         }
-        let replaying: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM history_loads WHERE session_id=? AND state='loading')",[&ticket.session_id],|r|r.get(0)).map_err(error)?;
-        if replaying { return Err("runtime_busy: conversation history is loading".into()); }
+        let replaying: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM history_loads WHERE session_id=? AND state='loading')",
+                [&ticket.session_id],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if replaying {
+            return Err("runtime_busy: conversation history is loading".into());
+        }
         let n = tx.execute("UPDATE runtime_sessions SET active_execution=? WHERE id=? AND owner=? AND active_execution IS NULL", params![ticket.execution_id,ticket.session_id,owner]).map_err(error)?;
         if n != 1 {
             return Err(
@@ -395,7 +428,7 @@ impl Store {
         Ok(())
     }
     pub fn runtime_store_info(&self) -> Value {
-        json!({"storeId":self.store_id,"schemaVersion":3})
+        json!({"storeId":self.store_id,"schemaVersion":4})
     }
 }
 

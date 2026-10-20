@@ -125,6 +125,37 @@ pub(crate) struct Workbench {
 }
 
 impl Workbench {
+    pub(crate) fn mark_workspace_files_changed(
+        &mut self,
+        workspace_id: &str,
+        workspace_path: &str,
+        paths: &[String],
+    ) {
+        if self.workspace_id.as_deref() == Some(workspace_id) {
+            self.pending.retain(|_, pending| {
+                match &pending.key {
+                    WorkbenchRequestKey::FilesList => false,
+                    WorkbenchRequestKey::FileRead(path) if !path.starts_with("policy:") => {
+                        !paths.iter().any(|changed| {
+                            workspace_relative_event_matches(changed, path, workspace_path)
+                        })
+                    }
+                    WorkbenchRequestKey::GitStatus
+                    | WorkbenchRequestKey::GitDiffs
+                    | WorkbenchRequestKey::GitLog
+                    | WorkbenchRequestKey::GitBranches
+                    | WorkbenchRequestKey::GitIssues
+                    | WorkbenchRequestKey::GitPullRequests
+                    | WorkbenchRequestKey::GitPullRequestDiff(_) => false,
+                    _ => true,
+                }
+            });
+            self.files
+                .mark_workspace_files_changed(paths, workspace_path);
+            self.git.mark_stale();
+        }
+    }
+
     pub(crate) fn set_workspace(&mut self, workspace_id: Option<String>) {
         if self.workspace_id != workspace_id {
             self.workspace_id = workspace_id;
@@ -319,6 +350,58 @@ fn is_run_launch_key(key: &WorkbenchRequestKey) -> bool {
     )
 }
 
+pub(crate) fn workspace_relative_event_matches(
+    changed_relative: &str,
+    displayed_path: &str,
+    workspace_path: &str,
+) -> bool {
+    let changed = normalize_display_path(changed_relative);
+    let displayed = normalize_display_path(displayed_path);
+    if changed == displayed {
+        return true;
+    }
+    let workspace = normalize_display_path(workspace_path).trim_end_matches('/').to_owned();
+    if workspace.is_empty() {
+        return false;
+    }
+    displayed
+        .strip_prefix(&workspace)
+        .and_then(|suffix| suffix.strip_prefix('/'))
+        .is_some_and(|relative| relative == changed)
+}
+
+fn normalize_display_path(path: &str) -> String {
+    let path = path.strip_prefix("file://").unwrap_or(path);
+    let mut bytes = Vec::with_capacity(path.len());
+    let raw = path.as_bytes();
+    let mut index = 0;
+    while index < raw.len() {
+        if raw[index] == b'%' && index + 2 < raw.len() {
+            if let (Some(high), Some(low)) = (hex(raw[index + 1]), hex(raw[index + 2])) {
+                bytes.push(high * 16 + low);
+                index += 3;
+                continue;
+            }
+        }
+        bytes.push(raw[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&bytes)
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .trim_start_matches("./")
+        .to_owned()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 pub(crate) fn read_runs(method: &str, params: Value) -> BackendRequest {
     BackendRequest::Runs(RunsRequest::read(method, params))
 }
@@ -438,6 +521,47 @@ mod tests {
         });
         assert!(workbench.pending.is_empty());
         assert_eq!(workbench.last_error.as_deref(), Some("keep"));
+    }
+
+    #[test]
+    fn acp_file_change_invalidates_files_and_git_only_for_current_workspace() {
+        let mut workbench = Workbench::default();
+        workbench.set_workspace(Some("workspace-a".into()));
+        assert!(!workbench.files.is_stale());
+        assert!(!workbench.git.is_stale());
+
+        workbench.mark_workspace_files_changed("workspace-b", "/work/repo", &["src/main.rs".into()]);
+        assert!(!workbench.files.is_stale());
+        assert!(!workbench.git.is_stale());
+        workbench.mark_workspace_files_changed("workspace-a", "/work/repo", &["src/main.rs".into()]);
+        assert!(workbench.files.is_stale());
+        assert!(workbench.git.is_stale());
+    }
+
+    #[test]
+    fn acp_file_change_drops_old_list_preview_and_git_replies_but_keeps_policy_edits() {
+        let mut workbench = Workbench::default();
+        let scope = scope("local", 1);
+        workbench.scope = Some(scope.clone());
+        workbench.set_workspace(Some("workspace-a".into()));
+        let list = Uuid::new_v4();
+        let preview = Uuid::new_v4();
+        let policy = Uuid::new_v4();
+        let git = Uuid::new_v4();
+        workbench.track_request(list, WorkbenchRequestKey::FilesList, scope.clone());
+        workbench.track_request(preview, WorkbenchRequestKey::FileRead("src/main.rs".into()), scope.clone());
+        workbench.track_request(policy, WorkbenchRequestKey::FileRead("policy:workspace:agents".into()), scope.clone());
+        workbench.track_request(git, WorkbenchRequestKey::GitStatus, scope.clone());
+
+        workbench.mark_workspace_files_changed("workspace-a", "/work/repo", &["src/main.rs".into()]);
+        assert_eq!(workbench.pending.len(), 1);
+        assert!(workbench.pending.contains_key(&policy));
+        workbench.apply_reply(BackendMessage::Reply {
+            correlation_id: preview,
+            scope: scope.clone(),
+            result: Ok(json!({"content":"stale"})),
+        });
+        assert!(workbench.pending.contains_key(&policy));
     }
 
     #[test]

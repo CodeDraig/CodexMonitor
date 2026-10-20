@@ -10,6 +10,7 @@ default-run = "codex-monitor"
 
 [features]
 default = ["tauri-host"]
+acp-host-services = ["dep:portable-pty"]
 tauri-host = [
   "dep:tauri",
   "dep:tauri-build",
@@ -22,7 +23,7 @@ tauri-host = [
   "dep:tauri-plugin-window-state",
   "dep:cpal",
   "dep:whisper-rs",
-  "dep:portable-pty",
+  "acp-host-services",
   "dep:objc2",
   "dep:objc2-app-kit",
   "dep:objc2-foundation",
@@ -39,7 +40,7 @@ native-gui = [
   "dep:image",
   "dep:rfd",
   "dep:arboard",
-  "dep:portable-pty",
+  "acp-host-services",
   "dep:cpal",
   "dep:whisper-rs",
   "dep:ed25519-dalek",
@@ -84,7 +85,7 @@ tauri-plugin-process = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
-tokio = { version = "1", features = ["fs", "net", "io-util", "process", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "net", "io-util", "process", "rt", "sync", "time", "macros", "signal"] }
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 uuid = { version = "1", features = ["v4"] }

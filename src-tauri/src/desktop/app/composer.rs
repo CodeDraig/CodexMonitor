@@ -68,6 +68,24 @@ impl NativeApp {
         }
         if !is_acp {
             self.show_codex_controls(ui, &key);
+        } else if let (
+            Some(profile_id),
+            ConversationRef::Acp { workspace_id, session_id, .. },
+        ) = (session["profile"]["id"].as_str(), &key.conversation)
+        {
+            if ui.button("Connection and sign-in").clicked() {
+                let cwd = self.controller.state.workspaces.iter()
+                    .find(|workspace| workspace.id == *workspace_id)
+                    .map(|workspace| workspace.path.clone())
+                    .unwrap_or_default();
+                self.acp_connections.open_existing_session(
+                    &mut self.controller,
+                    profile_id.to_owned(),
+                    session_id.clone(),
+                    workspace_id.clone(),
+                    cwd,
+                );
+            }
         }
         self.show_user_input(ui, &key, &conversation.user_input_requests);
         let dictation_scope = self.dictation_scope();
@@ -186,6 +204,9 @@ impl NativeApp {
                     });
                 }
             });
+        }
+        if is_acp {
+            self.show_client_requests(ui, &key, &conversation);
         }
         if let Some(request) = conversation.uncertain_request {
             ui.colored_label(theme::ERROR,format!("Submission outcome is uncertain ({request}). It will not be resent automatically."));
@@ -417,6 +438,100 @@ impl NativeApp {
                     }
                 },
             );
+        }
+    }
+
+    fn show_client_requests(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: &crate::client::ConversationKey,
+        conversation: &crate::desktop::controller::ConversationState,
+    ) {
+        if conversation.client_requests_waiting {
+            ui.weak("Waiting for the foreground ACP connection.");
+        }
+        if let Some(error) = &conversation.client_requests_error {
+            ui.colored_label(theme::ERROR, format!("ACP client request status: {error}"));
+        }
+        for request in &conversation.client_requests {
+            let id = request["clientRequestId"].clone();
+            let kind = request["kind"].as_str().unwrap_or("approval");
+            let enabled = !conversation.read_only
+                && conversation.client_connection_id.is_some()
+                && conversation.client_connection_generation.is_some();
+            ui.group(|ui| {
+                match kind {
+                    "url" => {
+                        ui.strong("Agent sign-in / URL consent");
+                        if let Some(message) = request["message"].as_str() {
+                            ui.label(message);
+                        }
+                        if let Some(url) = request["url"].as_str() {
+                            ui.label("Requested URL");
+                            ui.add(egui::Label::new(url).wrap().selectable(true));
+                            ui.horizontal(|ui| {
+                                if ui.button("Open URL").clicked() {
+                                    self.host(HostAction::OpenUrl { url: url.to_owned() }, None);
+                                }
+                                for (label, action) in [("Approve request", "accept"), ("Deny", "decline")] {
+                                    if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                        self.act(Action::RespondClientRequest {
+                                            key: key.clone(),
+                                            client_request_id: id.clone(),
+                                            decision: json!({"action":action}),
+                                        });
+                                    }
+                                }
+                            });
+                        } else {
+                            ui.label("The agent supplied no URL.");
+                        }
+                    }
+                    "command" | "approval" => {
+                        ui.strong("Agent client callback approval");
+                        if let Some(command) = request["command"].as_str() {
+                            ui.label(format!("Command: {command}"));
+                        }
+                        if let Some(args) = request["args"].as_array() {
+                            ui.label(format!("Arguments: {}", args.iter().map(|v| v.as_str().unwrap_or("?")).collect::<Vec<_>>().join(" ")));
+                        }
+                        if let Some(cwd) = request["cwd"].as_str() {
+                            ui.label(format!("Working directory: {cwd}"));
+                        }
+                        ui.horizontal(|ui| {
+                            for (label, action) in [("Allow once", "allow_once"), ("Deny", "deny")] {
+                                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                    self.act(Action::RespondClientRequest {
+                                        key: key.clone(),
+                                        client_request_id: id.clone(),
+                                        decision: json!({"action":action}),
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    _ => {
+                        ui.strong("Agent client request");
+                        if let Some(message) = request["message"].as_str() {
+                            ui.label(message);
+                        }
+                        ui.horizontal(|ui| {
+                            for (label, action) in [("Accept", "accept"), ("Decline", "decline")] {
+                                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                    self.act(Action::RespondClientRequest {
+                                        key: key.clone(),
+                                        client_request_id: id.clone(),
+                                        decision: json!({"action":action}),
+                                    });
+                                }
+                            }
+                        });
+                    }
+                }
+                if !enabled {
+                    ui.weak(if conversation.read_only { "This conversation is read-only; callback decisions are unavailable." } else { "Waiting for the foreground ACP connection." });
+                }
+            });
         }
     }
 }

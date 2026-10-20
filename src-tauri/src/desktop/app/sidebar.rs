@@ -915,6 +915,7 @@ impl NativeApp {
                     self.act(Action::CreateConversation {
                         workspace_id: workspace_id.clone(),
                         profile_id: None,
+                        prepared_connection: None,
                     });
                     self.agent_chooser = None;
                     self.workbench_open = false;
@@ -924,14 +925,24 @@ impl NativeApp {
                         continue;
                     }
                     let name = profile["name"].as_str().unwrap_or("ACP agent");
-                    if ui.button(name).clicked() {
-                        self.act(Action::CreateConversation {
-                            workspace_id: workspace_id.clone(),
-                            profile_id: profile["id"].as_str().map(str::to_owned),
-                        });
-                        self.agent_chooser = None;
-                        self.workbench_open = false;
-                    }
+                    let profile_id = profile["id"].as_str().unwrap_or("").to_owned();
+                    ui.horizontal(|ui| {
+                        if ui.button(format!("New · {name}")).clicked() {
+                            self.act(Action::CreateConversation {
+                                workspace_id: workspace_id.clone(),
+                                profile_id: Some(profile_id.clone()),
+                                prepared_connection: None,
+                            });
+                            self.agent_chooser = None;
+                            self.workbench_open = false;
+                        }
+                        if ui.small_button("Connect / sign in").clicked() {
+                            let cwd = self.controller.state.workspaces.iter()
+                                .find(|workspace| workspace.id == workspace_id)
+                                .map(|workspace| workspace.path.clone());
+                            self.acp_connections.open_profile(&mut self.controller, profile_id, cwd, Some(workspace_id.clone()));
+                        }
+                    });
                 }
                 ui.separator();
                 if ui.button("Configure agent profiles").clicked() {

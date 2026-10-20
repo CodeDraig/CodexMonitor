@@ -2,6 +2,14 @@ use super::*;
 
 const PENDING_BROWSER_SESSION_ID: &str = "codex-monitor-browser-pending-session";
 
+fn antigravity_preset_recipe() -> (&'static str, &'static str, &'static [&'static str]) {
+    (
+        "Google Antigravity ACP 1.4.1",
+        "./agy_acp_server.par",
+        &["--uid="],
+    )
+}
+
 #[derive(Clone)]
 struct PendingBrowserSession {
     scope: crate::client::BackendScope,
@@ -135,7 +143,12 @@ pub(super) struct ProfileEditor {
     pub executable: String,
     pub args: String,
     pub cwd: String,
-    pub preset: bool,
+    pub preset: String,
+    initialized: bool,
+    pub environment: String,
+    pub filesystem_policy: String,
+    pub command_policy: String,
+    pub additional_roots: String,
 }
 impl Default for ProfileEditor {
     fn default() -> Self {
@@ -146,8 +159,80 @@ impl Default for ProfileEditor {
             executable: String::new(),
             args: String::new(),
             cwd: String::new(),
-            preset: false,
+            preset: "generic".into(),
+            initialized: false,
+            environment: String::new(),
+            filesystem_policy: "disabled".into(),
+            command_policy: "disabled".into(),
+            additional_roots: String::new(),
         }
+    }
+}
+impl ProfileEditor {
+    fn from_profile(profile: &Value) -> Self {
+        let mut editor = Self {
+            id: profile["id"].as_str().map(str::to_owned),
+            revision: profile["revision"].as_u64().unwrap_or(0),
+            name: profile["name"].as_str().unwrap_or("").to_owned(),
+            executable: profile["executable"].as_str().unwrap_or("").to_owned(),
+            args: profile["args"]
+                .as_array()
+                .map(|args| {
+                    args.iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default(),
+            cwd: profile["workingDirectory"]
+                .as_str()
+                .unwrap_or("")
+                .to_owned(),
+            preset: match profile["presetId"].as_str() {
+                Some("antigravity") | Some("antigravity-acp") => "antigravity-acp",
+                Some(id) => id,
+                None if profile["kind"].as_str() == Some("open_code_acp") => "opencode",
+                None => "generic",
+            }
+            .to_owned(),
+            initialized: true,
+            ..Self::default()
+        };
+        if let Some(environment) = profile["environment"].as_object() {
+            editor.environment = environment
+                .iter()
+                .map(|(key, value)| {
+                    let value = match value["kind"].as_str() {
+                        Some("backendEnv") => format!("${}", value["name"].as_str().unwrap_or("")),
+                        _ => value["value"].as_str().unwrap_or("").to_owned(),
+                    };
+                    format!("{key}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+        }
+        editor.filesystem_policy = profile
+            .pointer("/clientPolicy/filesystem")
+            .and_then(Value::as_str)
+            .unwrap_or("disabled")
+            .to_owned();
+        editor.command_policy = profile
+            .pointer("/clientPolicy/commandExecution")
+            .and_then(Value::as_str)
+            .unwrap_or("disabled")
+            .to_owned();
+        editor.additional_roots = profile
+            .pointer("/clientPolicy/additionalRoots")
+            .and_then(Value::as_array)
+            .map(|roots| {
+                roots
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+        editor
     }
 }
 impl NativeApp {
@@ -219,6 +304,23 @@ impl NativeApp {
                         self.profile_editor = Some(ProfileEditor::default());
                     }
                 });
+                ui.collapsing("Configured ACP profiles", |ui| {
+                    for profile in self.controller.state.profiles.clone().into_iter()
+                        .filter(|profile| profile["kind"].as_str() != Some("codex")) {
+                        let id = profile["id"].as_str().unwrap_or("").to_owned();
+                        let name = profile["name"].as_str().unwrap_or("ACP agent").to_owned();
+                        ui.horizontal(|ui| {
+                            ui.label(&name);
+                            if ui.small_button("Edit").clicked() { self.profile_editor = Some(ProfileEditor::from_profile(&profile)); }
+                            if ui.small_button("Connection / sign in").clicked() {
+                                let cwd = self.selected_workspace.as_deref().and_then(|workspace_id|
+                                    self.controller.state.workspaces.iter().find(|workspace| workspace.id == workspace_id).map(|workspace| workspace.path.clone()));
+                                let workspace_id = self.selected_workspace.clone();
+                                self.acp_connections.open_profile(&mut self.controller, id, cwd, workspace_id);
+                            }
+                        });
+                    }
+                });
                 ui.horizontal_wrapped(|ui| {
                     if ui
                         .selectable_label(self.browser_profile.is_none(), "All profiles")
@@ -243,6 +345,17 @@ impl NativeApp {
                             .clicked()
                         {
                             self.browser_profile = Some(id.into());
+                        }
+                    }
+                    for profile in self.controller.state.profiles.clone().into_iter()
+                        .filter(|profile| profile["kind"].as_str() != Some("codex")) {
+                        let id = profile["id"].as_str().unwrap_or("").to_owned();
+                        let name = profile["name"].as_str().unwrap_or("ACP agent").to_owned();
+                        if ui.small_button(format!("Connect · {name}")).clicked() {
+                            let cwd = self.selected_workspace.as_deref().and_then(|workspace_id|
+                                self.controller.state.workspaces.iter().find(|workspace| workspace.id == workspace_id).map(|workspace| workspace.path.clone()));
+                            let workspace_id = self.selected_workspace.clone();
+                            self.acp_connections.open_profile(&mut self.controller, id, cwd, workspace_id);
                         }
                     }
                 });
@@ -410,13 +523,41 @@ impl NativeApp {
             .open(&mut open)
             .collapsible(false)
             .show(ctx, |ui| {
-                if ui
-                    .checkbox(&mut form.preset, "OpenCode launch preset")
-                    .changed()
-                    && form.preset
-                {
-                    form.name = "OpenCode".into();
-                    form.executable = "opencode".into();
+                let previous_preset = form.preset.clone();
+                egui::ComboBox::from_label("Agent preset")
+                    .selected_text(match form.preset.as_str() {
+                        "opencode" => "OpenCode",
+                        "claude" => "Claude ACP adapter",
+                        "gemini" => "Gemini CLI",
+                        "antigravity-acp" | "antigravity" => "Antigravity",
+                        _ => "Generic ACP",
+                    })
+                    .show_ui(ui, |ui| {
+                        for (id, label) in [
+                            ("generic", "Generic ACP"),
+                            ("opencode", "OpenCode"),
+                            ("claude", "Claude ACP adapter"),
+                            ("gemini", "Gemini CLI"),
+                            ("antigravity-acp", "Antigravity"),
+                        ] {
+                            ui.selectable_value(&mut form.preset, id.into(), label);
+                        }
+                    });
+                let preset_changed = previous_preset != form.preset;
+                if preset_changed || !form.initialized {
+                    form.initialized = true;
+                    match form.preset.as_str() {
+                        "opencode" => { form.name = "OpenCode".into(); form.executable = "opencode".into(); form.args.clear(); }
+                        "claude" => { form.name = "Claude".into(); form.executable = "claude-agent-acp".into(); form.args.clear(); }
+                        "gemini" => { form.name = "Gemini CLI".into(); form.executable = "gemini".into(); form.args = "--acp".into(); }
+                        "antigravity-acp" | "antigravity" => {
+                            let (name, executable, args) = antigravity_preset_recipe();
+                            form.name = name.into();
+                            form.executable = executable.into();
+                            form.args = args.join("\n");
+                        }
+                        _ => {}
+                    }
                 }
                 ui.label("Name");
                 ui.text_edit_singleline(&mut form.name);
@@ -426,11 +567,31 @@ impl NativeApp {
                 ui.add(egui::TextEdit::multiline(&mut form.args).desired_rows(3));
                 ui.label("Launch directory (optional)");
                 ui.text_edit_singleline(&mut form.cwd);
-                ui.label(if form.preset {
-                    "The OpenCode preset appends acp."
-                } else {
-                    "Generic ACP executes exactly the configured arguments."
-                });
+                if form.preset != "generic" {
+                    ui.label("Preset arguments are supplied by this launch recipe. You can edit them below.");
+                }
+                if matches!(form.preset.as_str(), "antigravity-acp" | "antigravity") {
+                    ui.label("Use the installed agy_acp_server.par path on the executing backend. The preset uses --uid= with an empty value and does not guess an installation UID.");
+                }
+                if form.preset == "gemini" && form.command_policy == "disabled" {
+                    ui.label("Gemini CLI 0.64 requires terminal callbacks. Choose Ask or Allow for command callbacks before connecting.");
+                }
+                ui.label("Environment · KEY=value or KEY=$BACKEND_VARIABLE per line");
+                ui.weak("Literal values are stored in the profile; use backend variables for credentials.");
+                ui.add(egui::TextEdit::multiline(&mut form.environment).desired_rows(2));
+                ui.label("Filesystem callbacks");
+                egui::ComboBox::from_id_salt("acp-profile-filesystem")
+                    .selected_text(&form.filesystem_policy)
+                    .show_ui(ui, |ui| { for option in ["disabled", "read_only", "read_write"] { ui.selectable_value(&mut form.filesystem_policy, option.into(), option); } });
+                ui.label("Command execution callbacks");
+                egui::ComboBox::from_id_salt("acp-profile-commands")
+                    .selected_text(&form.command_policy)
+                    .show_ui(ui, |ui| { for option in ["disabled", "ask", "allow"] { ui.selectable_value(&mut form.command_policy, option.into(), option); } });
+                if form.command_policy == "allow" {
+                    ui.colored_label(theme::ERROR, "Allowed agent commands run with the executing backend account's permissions.");
+                }
+                ui.label("Additional filesystem roots · one backend path per line");
+                ui.add(egui::TextEdit::multiline(&mut form.additional_roots).desired_rows(2));
                 save = ui
                     .add_enabled(
                         !form.name.trim().is_empty() && !form.executable.trim().is_empty(),
@@ -443,7 +604,30 @@ impl NativeApp {
                 .id
                 .clone()
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
-            let profile = json!({"id":id,"revision":form.revision,"name":form.name,"kind":if form.preset{"open_code_acp"}else{"acp"},"executable":form.executable,"args":form.args.lines().map(str::to_owned).collect::<Vec<_>>(),"workingDirectory":if form.cwd.trim().is_empty(){None}else{Some(&form.cwd)}});
+            let environment: serde_json::Map<String, Value> = form
+                .environment
+                .lines()
+                .filter_map(|line| {
+                    let (key, value) = line.split_once('=')?;
+                    let key = key.trim();
+                    if key.is_empty() {
+                        return None;
+                    }
+                    let value = value.trim();
+                    let source = value
+                        .strip_prefix('$')
+                        .filter(|name| !name.is_empty())
+                        .map(|name| json!({"kind":"backendEnv","name":name}))
+                        .unwrap_or_else(|| json!({"kind":"literal","value":value}));
+                    Some((key.to_owned(), source))
+                })
+                .collect();
+            let kind = if form.preset == "opencode" {
+                "open_code_acp"
+            } else {
+                "acp"
+            };
+            let profile = json!({"id":id,"revision":form.revision,"name":form.name,"kind":kind,"presetId":if form.preset == "generic" { None::<String> } else { Some(form.preset.clone()) },"executable":form.executable,"args":form.args.lines().map(str::to_owned).collect::<Vec<_>>(),"workingDirectory":if form.cwd.trim().is_empty(){None}else{Some(&form.cwd)},"environment":environment,"clientPolicy":{"filesystem":form.filesystem_policy,"commandExecution":form.command_policy,"additionalRoots":form.additional_roots.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect::<Vec<_>>()}});
             let request = BackendRequest::Runtime(RuntimeRequest::mutation(
                 RuntimeMethod::SaveProfile,
                 json!({"profile":profile,"expectedRevision":form.revision}),
@@ -460,6 +644,19 @@ impl NativeApp {
         } else if open {
             self.profile_editor = Some(form);
         }
+    }
+}
+
+#[cfg(test)]
+mod preset_tests {
+    use super::antigravity_preset_recipe;
+
+    #[test]
+    fn antigravity_preset_matches_the_configured_acp_recipe() {
+        let (name, executable, args) = antigravity_preset_recipe();
+        assert_eq!(name, "Google Antigravity ACP 1.4.1");
+        assert_eq!(executable, "./agy_acp_server.par");
+        assert_eq!(args, &["--uid="]);
     }
 }
 

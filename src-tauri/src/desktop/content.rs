@@ -35,6 +35,9 @@ pub enum ContentAction {
     LoadAttachment {
         id: String,
     },
+    ReadAcpTerminal {
+        terminal_id: String,
+    },
     /// Decode inline data URLs or raw ACP base64 on the host worker.
     LoadInlineAttachment {
         id: String,
@@ -1024,6 +1027,20 @@ impl ConversationView {
                 .id_salt(key)
                 .default_open(is_compaction)
                 .show(ui, |ui| {
+                    let has_terminal_content = contains_terminal_content(&item["content"])
+                        || contains_terminal_content(&item["acpContent"]["blocks"]);
+                    if !has_terminal_content {
+                        if let Some(terminal_id) = item["terminalId"]
+                            .as_str()
+                            .or(item.pointer("/terminal/id").and_then(Value::as_str))
+                        {
+                            if ui.button("Read command terminal output").clicked() {
+                                actions.push(ContentAction::ReadAcpTerminal {
+                                    terminal_id: terminal_id.to_owned(),
+                                });
+                            }
+                        }
+                    }
                     if let Some(detail) = item["detail"].as_str().filter(|s| !s.is_empty()) {
                         ui.label(RichText::new("Input").strong());
                         self.render_code(ui, detail, "json");
@@ -1387,6 +1404,25 @@ impl ConversationView {
                                 "json",
                             );
                         });
+                    }
+                }
+                "terminal" => {
+                    if let Some(terminal_id) = content["terminalId"].as_str() {
+                        ui.label(RichText::new("Command terminal").strong());
+                        if ui.button("Read command terminal output").clicked() {
+                            let action = ContentAction::ReadAcpTerminal {
+                                terminal_id: terminal_id.to_owned(),
+                            };
+                            if !actions.contains(&action) {
+                                actions.push(action);
+                            }
+                        }
+                    } else {
+                        self.render_code(
+                            ui,
+                            &serde_json::to_string_pretty(content).unwrap_or_default(),
+                            "json",
+                        );
                     }
                 }
                 "resource_link" | "link" => {
@@ -1885,6 +1921,18 @@ fn item_key(identity: &str, item: &Value) -> String {
     format!("{identity}/{}", item["id"].as_str().unwrap_or("anonymous"))
 }
 
+fn contains_terminal_content(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(contains_terminal_content),
+        Value::Object(fields) => {
+            (fields.get("type").and_then(Value::as_str) == Some("terminal")
+                && fields.get("terminalId").and_then(Value::as_str).is_some())
+                || fields.values().any(contains_terminal_content)
+        }
+        _ => false,
+    }
+}
+
 fn media_key(identity: &str, attachment_id: &str) -> String {
     format!("{identity}/attachment/{attachment_id}")
 }
@@ -1987,6 +2035,43 @@ fn file_change_has_separate_diffs(item: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_terminal_tool_content_exposes_read_action_without_duplicate_button() {
+        use egui_kittest::{kittest::Queryable, Harness};
+        use std::{cell::RefCell, rc::Rc};
+
+        let items = vec![serde_json::json!({
+            "id":"tool-42",
+            "kind":"tool",
+            "title":"Command",
+            "terminalId":"terminal-42",
+            "content":[{"type":"terminal","terminalId":"terminal-42"}]
+        })];
+        let actions = Rc::new(RefCell::new(Vec::new()));
+        let captured_actions = actions.clone();
+        let mut view = ConversationView::default();
+        let mut harness = Harness::new_ui(move |ui| {
+            captured_actions
+                .borrow_mut()
+                .extend(view.show(ui, &items, "local/store/session").actions);
+        });
+
+        assert!(harness
+            .query_by_label("Read command terminal output")
+            .is_none());
+        harness.get_by_label("Command").click();
+        harness.run();
+        harness.get_by_label("Read command terminal output").click();
+        harness.run();
+
+        assert_eq!(
+            actions.borrow().as_slice(),
+            &[ContentAction::ReadAcpTerminal {
+                terminal_id: "terminal-42".into()
+            }]
+        );
+    }
 
     #[test]
     fn virtualizer_padding_and_scroll_anchor_stay_content_relative_after_scroll() {

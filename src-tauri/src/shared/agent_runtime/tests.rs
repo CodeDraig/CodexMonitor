@@ -66,6 +66,9 @@ impl Fixture {
         s.save_runtime_profile(
             RuntimeProfile {
                 working_directory: None,
+                preset_id: None,
+                environment: Default::default(),
+                client_policy: Default::default(),
                 id: "fixture".into(),
                 revision: 0,
                 name: "Fixture".into(),
@@ -310,6 +313,9 @@ fn migration_preserves_legacy_payloads_and_profile_cas() {
     let mut a = Store::open(&p).unwrap();
     let profile = RuntimeProfile {
         working_directory: None,
+        preset_id: None,
+        environment: Default::default(),
+        client_policy: Default::default(),
         id: "test".into(),
         revision: 0,
         name: "Test".into(),
@@ -342,6 +348,9 @@ fn runtime_profile_native_ids_are_scoped_and_owner_exit_is_uncertain() {
         cwd: "/tmp".into(),
         profile: RuntimeProfile {
             working_directory: None,
+            preset_id: None,
+            environment: Default::default(),
+            client_policy: Default::default(),
             id: "one".into(),
             revision: 1,
             name: "One".into(),
@@ -411,10 +420,160 @@ fn acp_rejects_unadvertised_inputs_and_versions() {
     assert!(f.rpc("configure",json!({"sessionId":session["sessionId"],"optionId":"model","value":"invented"})).await.unwrap_err().contains("not advertised"));
     f.rpc("configure",json!({"sessionId":session["sessionId"],"optionId":"model","value":"fixture"})).await.unwrap();
     f.rpc("disconnect",json!({"sessionId":session["sessionId"]})).await.unwrap();
-    let profile=RuntimeProfile{ working_directory: None,id:"bad".into(),revision:0,name:"Bad version".into(),kind:RuntimeKind::OpenCodeAcp,executable:"python3".into(),args:vec![format!("{}/src/shared/agent_runtime/fixtures/fake_acp.py",env!("CARGO_MANIFEST_DIR")),"--bad-version".into()]};
+    let profile = RuntimeProfile {
+        working_directory: None,
+        preset_id: None,
+        environment: Default::default(),
+        client_policy: Default::default(),
+        id: "bad".into(),
+        revision: 0,
+        name: "Bad version".into(),
+        kind: RuntimeKind::OpenCodeAcp,
+        executable: "python3".into(),
+        args: vec![
+            format!(
+                "{}/src/shared/agent_runtime/fixtures/fake_acp.py",
+                env!("CARGO_MANIFEST_DIR")
+            ),
+            "--bad-version".into(),
+        ],
+    };
     f.rpc("save_profile",json!({"profile":profile,"expectedRevision":0})).await.unwrap();
     assert!(f.rpc("create_session",json!({"workspaceId":"w","profileId":"bad"})).await.unwrap_err().contains("ACP protocol version"));
 });
+}
+
+#[test]
+fn mismatched_connection_prepare_does_not_claim_saved_session() {
+    runtime().block_on(async {
+        let fixture = Fixture::new();
+        let session = fixture.session().await;
+        let session_id = session["sessionId"].as_str().unwrap().to_owned();
+        let owner_before: Option<String> = Store::open(&fixture.path)
+            .unwrap()
+            .conn
+            .query_row(
+                "SELECT owner FROM runtime_sessions WHERE id=?1",
+                [&session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let other_directory = dir();
+        let error = fixture
+            .rpc(
+                "prepare_connection",
+                json!({
+                    "profileId":"fixture",
+                    "expectedProfileRevision":1,
+                    "cwd":other_directory,
+                    "sessionId":session_id,
+                    "role":"conversation",
+                    "requestId":"mismatched-prepare"
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.contains("directory does not match"), "{error}");
+        let owner_after: Option<String> = Store::open(&fixture.path)
+            .unwrap()
+            .conn
+            .query_row(
+                "SELECT owner FROM runtime_sessions WHERE id=?1",
+                [&session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner_after, owner_before);
+        fixture
+            .rpc("disconnect", json!({"sessionId":session_id}))
+            .await
+            .unwrap();
+        let _ = std::fs::remove_dir_all(other_directory);
+    });
+}
+
+#[test]
+fn preparing_and_closing_saved_conversation_does_not_reserve_ownership() {
+    runtime().block_on(async {
+        let fixture = Fixture::new();
+        let session = fixture.session().await;
+        let sid = session["sessionId"].as_str().unwrap().to_owned();
+        fixture
+            .rpc("disconnect", json!({"sessionId":sid}))
+            .await
+            .unwrap();
+        let cwd = fixture.workspaces.lock().await["w"].path.clone();
+        let ticket = fixture
+            .rpc(
+                "prepare_connection",
+                json!({
+                    "profileId":"fixture", "expectedProfileRevision":1,
+                    "cwd":cwd, "sessionId":sid, "role":"conversation",
+                    "requestId":"unused-saved-conversation-setup"
+                }),
+            )
+            .await
+            .unwrap();
+        fixture
+            .rpc(
+                "close_connection",
+                json!({
+                    "connectionId":ticket["connectionId"], "generation":ticket["generation"]
+                }),
+            )
+            .await
+            .unwrap();
+        let owner: Option<String> = Store::open(&fixture.path)
+            .unwrap()
+            .conn
+            .query_row(
+                "SELECT owner FROM runtime_sessions WHERE id=?",
+                [&sid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner, None);
+        let other = RuntimeRegistry::default();
+        Store::open(&fixture.path)
+            .unwrap()
+            .claim_runtime_session(&sid, &other.owner)
+            .unwrap();
+    });
+}
+
+#[test]
+fn ordinary_conversation_can_inspect_its_owned_connection_without_preparing_one() {
+    runtime().block_on(async {
+        let fixture = Fixture::new();
+        let session = fixture.session().await;
+        let status = fixture.rpc("connection_status", json!({"sessionId":session["sessionId"]})).await.unwrap();
+        assert_eq!(status["profileId"], "fixture");
+        assert_eq!(status["generation"], 1);
+        assert!(status["connectionId"].as_str().is_some_and(|id| !id.is_empty()));
+        assert_eq!(status["pendingClientRequests"], json!([]));
+        let other = Fixture::new();
+        let error = runtime_rpc::dispatch("connection_status", json!({"sessionId":session["sessionId"]}),
+            fixture.path.clone(), &other.registry, &other.workspaces, &other.sessions,
+            &other.settings, other.sink.clone()).await.unwrap_err();
+        assert!(error.contains("not found"), "{error}");
+        fixture.rpc("disconnect", json!({"sessionId":session["sessionId"]})).await.unwrap();
+    });
+}
+
+#[test]
+fn durable_agent_identity_excludes_authentication_descriptors() {
+    let initialization = json!({
+        "protocolVersion":1, "agentInfo":{"name":"Generic ACP","version":"1"},
+        "agentCapabilities":{"loadSession":true},
+        "authMethods":[{"id":"login","type":"terminal","args":["secret-argument-sentinel"],
+            "env":{"TOKEN":"secret-environment-sentinel"}}]
+    });
+    let evidence = super::registry::acp_evidence_initialization(&initialization);
+    assert_eq!(evidence["agentInfo"], initialization["agentInfo"]);
+    assert_eq!(evidence["agentCapabilities"], initialization["agentCapabilities"]);
+    assert!(evidence.get("authMethods").is_none());
+    assert!(!evidence.to_string().contains("sentinel"));
+    assert!(initialization.get("authMethods").is_some());
 }
 
 fn legacy_rows(store: &Store) -> Vec<Vec<Vec<String>>> {
@@ -619,5 +778,58 @@ fn codex_runtime_binds_notifications_before_delivering_creation_reply() {
         f.rpc("disconnect", json!({"sessionId":session["sessionId"]}))
             .await
             .unwrap();
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn open_session_by_id_uses_backend_environment_without_returning_its_value() {
+    runtime().block_on(async {
+        let f = Fixture::new();
+        let workspace = f.workspaces.lock().await["w"].clone();
+        let required_value = std::env::var("PATH").expect("test needs PATH");
+        let profile = RuntimeProfile {
+            id: "environment-probe".into(),
+            revision: 0,
+            name: "Environment probe".into(),
+            kind: RuntimeKind::Acp,
+            executable: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    "test -n \"$ACP_TEST_PROVIDER_ENV\" && exec python3 {}/src/shared/agent_runtime/fixtures/fake_acp.py",
+                    env!("CARGO_MANIFEST_DIR")
+                ),
+            ],
+            working_directory: None,
+            preset_id: None,
+            environment: std::collections::BTreeMap::from([(
+                "ACP_TEST_PROVIDER_ENV".into(),
+                EnvironmentSource::BackendEnv {
+                    name: "PATH".into(),
+                },
+            )]),
+            client_policy: Default::default(),
+        };
+        f.rpc(
+            "save_profile",
+            json!({"profile":profile,"expectedRevision":0}),
+        )
+        .await
+        .unwrap();
+
+        let opened = f
+            .rpc(
+                "open_session_by_id",
+                json!({
+                    "profileId":"environment-probe",
+                    "nativeSessionId":"environment-probe-native",
+                    "cwd":workspace.path,
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(opened["nativeSessionId"], "environment-probe-native");
+        assert!(!opened.to_string().contains(&required_value));
     });
 }

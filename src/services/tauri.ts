@@ -1254,6 +1254,71 @@ export function listRunTurns(instanceId: string) { return invoke<{id: string; st
 export function runtimeRequest<T>(method: string, input: Record<string, unknown> = {}) {
   return invoke<T>("runtime_request", {method, input});
 }
+
+// ACP connection and client callback operations use the same selected-backend
+// route as other runtime calls. These wrappers deliberately accept only
+// identifiers and non-secret profile metadata; resolved backend environment
+// values never cross into the frontend.
+export type RuntimeConnectionOperation = {
+  operationId: string;
+  connectionId: string;
+  generation: number;
+  state: string;
+  error?: string | null;
+};
+export function prepareRuntimeConnection(input: {
+  profileId: string;
+  expectedProfileRevision: number;
+  cwd?: string;
+  sessionId?: string;
+  role: "conversation" | "discovery" | "authentication";
+  requestId: string;
+}) {
+  return runtimeRequest<RuntimeConnectionOperation>("prepare_connection", input);
+}
+export function getRuntimeConnectionStatus(connectionId: string, generation: number) {
+  return runtimeRequest<import("@/features/runtime/types").AcpConnectionStatus>("connection_status", {connectionId, generation});
+}
+// Resolve the connection already consumed by this foreground session. This is
+// a lookup only; it never prepares or reconnects an ACP process.
+export function getRuntimeSessionConnectionStatus(sessionId:string) {
+  return runtimeRequest<import("@/features/runtime/types").AcpConnectionStatus|null>("connection_status", {sessionId});
+}
+export function authenticateRuntimeConnection(input: {connectionId:string;generation:number;methodId:string;requestId:string}) {
+  return runtimeRequest<RuntimeConnectionOperation>("authenticate", input);
+}
+export function getRuntimeConnectionOperation(input: {operationId:string;connectionId:string;generation:number}) {
+  return runtimeRequest<RuntimeConnectionOperation>("connection_operation", input);
+}
+export function cancelRuntimeConnectionOperation(input: {operationId:string;connectionId:string;generation:number;requestId:string}) {
+  return runtimeRequest<RuntimeConnectionOperation>("cancel_connection_operation", input);
+}
+export function logoutRuntimeConnection(input: {connectionId:string;generation:number;requestId:string}) {
+  return runtimeRequest<RuntimeConnectionOperation>("logout", input);
+}
+export function closeRuntimeConnection(input: {connectionId:string;generation:number}) {
+  return runtimeRequest<void>("close_connection", input);
+}
+export function respondAcpClientRequest(input: {
+  connectionId:string;generation:number;clientRequestId:string|number;decision:Record<string,unknown>;
+}) {
+  return runtimeRequest<void>("respond_client_request", input);
+}
+export function readAcpLoginTerminal(input: {connectionId:string;generation:number;operationId:string;cursor:number;limit?:number}) {
+  return runtimeRequest<{output:string;nextCursor:number;truncated:boolean;exitStatus?:number|null;state:string}>("read_login_terminal", input);
+}
+export function writeAcpLoginTerminal(input: {connectionId:string;generation:number;operationId:string;inputSequence:number;data:string}) {
+  return runtimeRequest<void>("write_login_terminal", input);
+}
+export function resizeAcpLoginTerminal(input: {connectionId:string;generation:number;operationId:string;columns:number;rows:number}) {
+  return runtimeRequest<void>("resize_login_terminal", input);
+}
+export function closeAcpLoginTerminal(input: {connectionId:string;generation:number;operationId:string}) {
+  return runtimeRequest<void>("close_login_terminal", input);
+}
+export function readAcpCommandTerminal(input: import("@/features/runtime/types").AcpTerminalRead) {
+  return runtimeRequest<unknown>("read_acp_terminal", input);
+}
 export async function buildRuntimePrompt(text: string, images: string[], kind: import("@/features/runtime/types").RuntimeKind) {
   const input: Record<string, unknown>[] = text ? [{type: "text", text}] : [];
   for (const image of (await normalizeImagesForRpc(images) ?? [])) {

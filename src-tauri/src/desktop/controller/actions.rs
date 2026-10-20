@@ -26,6 +26,7 @@ pub(crate) enum ControllerAction {
     CreateConversation {
         workspace_id: String,
         profile_id: Option<String>,
+        prepared_connection: Option<(String, u64)>,
     },
     SelectCodex {
         workspace_id: String,
@@ -73,6 +74,11 @@ pub(crate) enum ControllerAction {
         workspace_id: String,
         request_id: Value,
         result: Value,
+    },
+    RespondClientRequest {
+        key: crate::client::ConversationKey,
+        client_request_id: Value,
+        decision: Value,
     },
     Configure {
         option_id: String,

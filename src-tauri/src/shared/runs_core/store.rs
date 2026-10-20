@@ -21,10 +21,10 @@ pub(crate) fn error(e: impl std::error::Error + 'static) -> String {
 pub(crate) fn is_busy(error: &str) -> bool {
     error.starts_with(BUSY_PREFIX)
 }
-fn encode(v: &impl serde::Serialize) -> Result<String> {
+pub(crate) fn encode(v: &impl serde::Serialize) -> Result<String> {
     serde_json::to_string(v).map_err(error)
 }
-fn decode<T: serde::de::DeserializeOwned>(v: String) -> Result<T> {
+pub(crate) fn decode<T: serde::de::DeserializeOwned>(v: String) -> Result<T> {
     serde_json::from_str(&v).map_err(error)
 }
 
@@ -37,7 +37,7 @@ impl Store {
         // Multiple desktop/daemon workers can be the first process to touch a
         // fresh store at once. SQLite cannot always wait through the
         // journal_mode=WAL transition, so retry only SQLITE_BUSY from the
-        // open/bootstrap path. Normal schema-3 reads still open without taking
+        // open/bootstrap path. Normal current-schema reads still open without taking
         // a writer lock, and all non-contention failures remain immediate.
         let deadline = std::time::Instant::now() + OPEN_RETRY_WINDOW;
         loop {
@@ -62,7 +62,7 @@ impl Store {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 3 {
+        if version > 4 {
             return Err(format!("Unsupported run schema {version}"));
         }
         // WAL lets the desktop retain a read snapshot while the daemon commits.
@@ -81,16 +81,28 @@ impl Store {
             }
         }
         // Reads of an existing schema must not reserve SQLite's single writer.
-        if version == 3 {
+        if version == 4 {
             let store_id = conn
                 .query_row("SELECT id FROM metadata", [], |r| r.get(0))
                 .map_err(error)?;
             return Ok(Self { conn, store_id });
         }
         // VACUUM INTO includes committed WAL pages and never overwrites an old backup.
-        if version == 1 || version == 2 {
-            let backup = path.with_file_name(format!("runs.schema{version}-backup-{}.sqlite3", id()));
-            conn.execute("VACUUM INTO ?", [backup.to_string_lossy().as_ref()]).map_err(error)?;
+        if version == 1 || version == 2 || version == 3 {
+            let backup =
+                path.with_file_name(format!("runs.schema{version}-backup-{}.sqlite3", id()));
+            conn.execute("VACUUM INTO ?", [backup.to_string_lossy().as_ref()])
+                .map_err(error)?;
+            // Competing openers can finish the upgrade while this process is
+            // still making its backup. Never label a newer snapshot as the
+            // prior schema; another upgrader already made the required backup.
+            let backed_up_version: u32 = Connection::open(&backup)
+                .map_err(error)?
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .map_err(error)?;
+            if backed_up_version != version {
+                std::fs::remove_file(&backup).map_err(error)?;
+            }
         }
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -99,7 +111,7 @@ impl Store {
         let version: u32 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 3 {
+        if version > 4 {
             return Err(format!("Unsupported run schema {version}"));
         }
         if version == 0 {
@@ -122,11 +134,17 @@ impl Store {
                 .map_err(error)?;
         }
         if version < 2 {
-            tx.execute_batch(crate::shared::agent_runtime::store::SCHEMA).map_err(error)?;
+            tx.execute_batch(crate::shared::agent_runtime::store::SCHEMA)
+                .map_err(error)?;
         }
         if version < 3 {
-            tx.execute_batch(crate::shared::agent_runtime::conversations::SCHEMA).map_err(error)?;
+            tx.execute_batch(crate::shared::agent_runtime::conversations::SCHEMA)
+                .map_err(error)?;
             crate::shared::agent_runtime::conversations::backfill(&tx)?;
+        }
+        if version < 4 {
+            tx.execute_batch(crate::shared::agent_runtime::client_store::SCHEMA)
+                .map_err(error)?;
         }
         let store_id = tx
             .query_row("SELECT id FROM metadata", [], |r| r.get(0))
@@ -262,7 +280,9 @@ impl Store {
                 workspace_path: (input.mode == "local").then(|| path.clone()),
                 thread_id: None,
                 initial_turn_id: None,
-                runtime: None, session_id: None, initial_execution_id: None,
+                runtime: None,
+                session_id: None,
+                initial_execution_id: None,
                 submission_outcome: SubmissionOutcome::NotSubmitted,
                 execution_outcome: ExecutionOutcome::NotStarted,
                 submission: None,
@@ -603,14 +623,22 @@ impl Store {
         }
         // Keep acknowledged comparison revisions recoverable alongside the current row.
         if record.revision > 0 {
-            tx.execute("INSERT OR IGNORE INTO comparison_revisions VALUES(?,?,?)", params![record.id,record.revision,encode(&record)?]).map_err(error)?;
+            tx.execute(
+                "INSERT OR IGNORE INTO comparison_revisions VALUES(?,?,?)",
+                params![record.id, record.revision, encode(&record)?],
+            )
+            .map_err(error)?;
         }
         record.choice = choice;
         record.notes = notes;
         record.revision += 1;
         record.updated_at = now();
         tx.execute("INSERT INTO comparisons VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,payload=excluded.payload", params![record.id,record.left_capture_id,record.right_capture_id,record.revision,encode(&record)?]).map_err(error)?;
-        tx.execute("INSERT INTO comparison_revisions VALUES(?,?,?)", params![record.id,record.revision,encode(&record)?]).map_err(error)?;
+        tx.execute(
+            "INSERT INTO comparison_revisions VALUES(?,?,?)",
+            params![record.id, record.revision, encode(&record)?],
+        )
+        .map_err(error)?;
         tx.commit().map_err(error)?;
         Ok(record)
     }

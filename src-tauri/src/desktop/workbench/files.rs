@@ -19,6 +19,7 @@ pub(crate) struct FilesPanel {
     policy_kind: String,
     dirty: bool,
     status: Option<String>,
+    refresh_selected: bool,
 }
 impl FilesPanel {
     pub(crate) fn reset(&mut self) {
@@ -26,6 +27,23 @@ impl FilesPanel {
     }
     pub(crate) fn mark_stale(&mut self) {
         self.stale = true;
+    }
+    pub(crate) fn mark_workspace_files_changed(&mut self, paths: &[String], workspace_path: &str) {
+        self.stale = true;
+        self.refresh_selected = self.selected.as_ref().is_some_and(|selected| {
+            !selected.starts_with("policy:")
+                && paths.iter().any(|path| {
+                    super::workspace_relative_event_matches(path, selected, workspace_path)
+                })
+        });
+        if self.refresh_selected {
+            self.loading = true;
+            self.error = None;
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn is_stale(&self) -> bool {
+        self.stale
     }
     pub(crate) fn show(
         &mut self,
@@ -60,6 +78,18 @@ impl FilesPanel {
                     request: read_files("list_workspace_files", json!({"workspaceId":w})),
                 });
                 self.stale = false;
+            }
+        }
+        if self.refresh_selected {
+            self.refresh_selected = false;
+            if let (Some(w), Some(path)) = (workspace, self.selected.as_ref()) {
+                effects.push(PanelEffect::Request {
+                    key: WorkbenchRequestKey::FileRead(path.clone()),
+                    request: read_files(
+                        "read_workspace_file",
+                        json!({"workspaceId":w,"path":path,"maxBytes":1048576}),
+                    ),
+                });
             }
         }
         ui.horizontal(|ui| {
@@ -243,6 +273,7 @@ impl FilesPanel {
     }
 }
 
+
 #[derive(Debug, Default)]
 struct DirectoryNode {
     directories: BTreeMap<String, DirectoryNode>,
@@ -408,5 +439,34 @@ mod tests {
         drop(harness);
         assert!(selected.is_none());
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn changed_selected_readonly_file_emits_a_fresh_read_request() {
+        let mut panel = FilesPanel {
+            workspace: Some("workspace-a".into()),
+            selected: Some("/work/repo/src/main file.rs".into()),
+            content: "old contents".into(),
+            ..FilesPanel::default()
+        };
+        panel.mark_workspace_files_changed(&["src/main file.rs".into()], "/work/repo");
+        let effects = std::cell::RefCell::new(Vec::new());
+        let mut harness = Harness::new_ui(|ui| {
+            panel.show(ui, &mut effects.borrow_mut(), Some("workspace-a"));
+        });
+        // The pending read intentionally keeps the spinner repainting until a
+        // backend reply arrives; inspect bounded frames rather than waiting idle.
+        harness.run_steps(2);
+        drop(harness);
+        let effects = effects.into_inner();
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            PanelEffect::Request {
+                key: WorkbenchRequestKey::FileRead(path),
+                request,
+            } if path == "/work/repo/src/main file.rs"
+                && request.rpc().params["path"].as_str() == Some(path.as_str())
+        )));
+        assert_eq!(panel.content, "old contents", "refresh must preserve prior content until the read reply arrives");
     }
 }

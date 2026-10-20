@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { Paperclip, RefreshCw } from "lucide-react";
 import type { AcpConversations } from "../hooks/useAcpConversations";
 import type { RuntimeConfigOption } from "../types";
+import { AcpSessionClientRequests } from "./AcpSessionClientRequests";
 
 export function AcpConversationControls({ runtime: r }: { runtime: AcpConversations }) {
   const attachments = useRef<HTMLInputElement>(null);
@@ -13,6 +14,7 @@ export function AcpConversationControls({ runtime: r }: { runtime: AcpConversati
   const supportsAttachments = session?.capabilities.images || session?.capabilities.audio || session?.capabilities.embeddedContext;
 
   return <div className="acp-conversation-controls">
+    {session && r.backendKey && <AcpSessionClientRequests sessionId={session.sessionId} backendKey={r.backendKey} activeExecution={Boolean(r.active||r.pending||r.sending||r.uncertain||r.queue.length||Object.keys(r.permissions).length)} />}
     <div className="acp-conversation-status">
       <p><span className="acp-conversation-agent">{session?.profile.name ?? "ACP conversation"}</span> · {r.page?.coverage === "agent_replay" ? "Agent-supplied conversation" : "Observed history only"}{r.loading ? " · Refreshing history…" : ""}{r.page?.freshness.stale ? " · Cached history is stale" : ""}{r.page?.readOnly ? " · Read-only: another backend owns this session" : ""}</p>
       <button type="button" className="ghost acp-conversation-refresh" disabled={r.loading || !!r.active || !!r.pending || r.sending || !!r.queue.length || !!Object.keys(r.permissions).length || r.page?.readOnly} onClick={() => void r.refresh()}>

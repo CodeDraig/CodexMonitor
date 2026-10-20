@@ -32,6 +32,9 @@ async fn fixture(f: &Fixture, label: &str, args: Vec<&str>) -> String {
     std::fs::write(catalog.clone(), serde_json::to_vec(&rows).unwrap()).unwrap();
     let profile = RuntimeProfile {
         working_directory: None,
+        preset_id: None,
+        environment: Default::default(),
+        client_policy: Default::default(),
         id: label.into(),
         revision: 0,
         name: label.into(),
@@ -123,6 +126,9 @@ fn generic_and_opencode_label_share_discovery_replay_and_main_contracts() {
 fn profile_scope_ignores_display_names_and_separates_launch_configuration() {
     let mut p = RuntimeProfile {
         working_directory: None,
+        preset_id: None,
+        environment: Default::default(),
+        client_policy: Default::default(),
         id: "p".into(),
         revision: 1,
         name: "A".into(),
@@ -139,6 +145,43 @@ fn profile_scope_ignores_display_names_and_separates_launch_configuration() {
     p.kind = RuntimeKind::OpenCodeAcp;
     assert_eq!(p.launch_args().last().unwrap(), "acp");
 }
+
+#[test]
+fn legacy_profile_defaults_keep_scope_and_environment_changes_scope() {
+    // This is the persisted schema-3 shape: no preset, environment, or client
+    // policy fields. Its connection scope must stay identical to the old hash.
+    let mut p: RuntimeProfile = serde_json::from_value(json!({
+        "id":"p",
+        "revision":1,
+        "name":"Agent",
+        "kind":"open_code_acp",
+        "executable":"opencode",
+        "args":[],
+        "workingDirectory":null
+    }))
+    .unwrap();
+    assert_eq!(p.preset_id, None);
+    assert!(p.environment.is_empty());
+    assert_eq!(p.client_policy, AcpClientPolicy::default());
+    let legacy_scope = p.connection_scope();
+    assert_eq!(
+        legacy_scope,
+        "p:1f6cb6b1936ab21f636117403f26291633500b53bb2d8af896f088fd2675d7c0"
+    );
+
+    p.preset_id = Some("opencode".into());
+    p.name = "Renamed".into();
+    p.client_policy.filesystem = AcpFilesystemPolicy::ReadOnly;
+    assert_eq!(legacy_scope, p.connection_scope());
+
+    p.environment.insert(
+        "SERVICE_TOKEN".into(),
+        EnvironmentSource::BackendEnv {
+            name: "SERVICE_TOKEN".into(),
+        },
+    );
+    assert_ne!(legacy_scope, p.connection_scope());
+}
 #[test]
 fn failed_replay_keeps_previous_snapshot_and_metadata_is_revision_checked() {
     runtime().block_on(async{
@@ -153,6 +196,23 @@ fn failed_replay_keeps_previous_snapshot_and_metadata_is_revision_checked() {
     assert!(crate::shared::runtime_rpc::dispatch("load_conversation_history",json!({"sessionId":s["sessionId"],"requestId":runs_core::id()}),f.path.clone(),&other.registry,&other.workspaces,&other.sessions,&other.settings,other.sink.clone()).await.unwrap_err().starts_with("runtime_busy:"));
     f.rpc("disconnect",json!({"sessionId":s["sessionId"]})).await.unwrap();
 });
+}
+#[test]
+fn repeated_failed_history_completion_keeps_its_first_result() {
+    runtime().block_on(async {
+        let f = Fixture::new();
+        let session = f.rpc("create_session", json!({"workspaceId":"w","profileId":"fixture"})).await.unwrap();
+        let mut store = Store::open(&f.path).unwrap();
+        let request = runs_core::id();
+        let (load, _) = store.begin_history_load(session["sessionId"].as_str().unwrap(), &request, &f.registry.owner).unwrap();
+        store.finish_history_load(&load.id, Some("request failed"), 0).unwrap();
+        store.finish_history_load(&load.id, Some("ordered error response"), 1).unwrap();
+        let saved = store.history_load(&request).unwrap().unwrap();
+        assert_eq!(saved.state, "failed");
+        assert_eq!(saved.error.as_deref(), Some("request failed"));
+        assert!(store.finish_history_load(&load.id, None, 2).unwrap_err().contains("completion conflicts"));
+        f.rpc("disconnect", json!({"sessionId":session["sessionId"]})).await.unwrap();
+    });
 }
 #[test]
 fn schema_two_upgrade_preserves_payloads_and_backfills_uuid_aliases() {
