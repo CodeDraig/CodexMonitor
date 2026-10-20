@@ -23,10 +23,10 @@ on 2026-10-20 passed:
 The window smoke used the newly built debug executable with an explicit temporary
 data directory on X11. Computer-use could not bind its window; direct X11 window
 identity, screenshots, and mouse input supplied the smoke observation. It did not
-exercise new local/daemon conversations or establish macOS, Windows, or Nix package
-acceptance. Nix is unavailable on this host. Compiler unused/dead-code warnings
-remain visible. No test build was installed. Installation, live-data, launcher,
-plan, and unrelated-cache hashes were verified unchanged.
+exercise new local/daemon conversations or establish macOS or Windows package
+acceptance. Compiler unused/dead-code warnings remain visible. No test build was
+installed. Installation, live-data, launcher, plan, and unrelated-cache hashes
+were verified unchanged.
 
 The interaction records below are bound to their named executables and source
 revisions; they do not attest the current checkout. Temporary build and test

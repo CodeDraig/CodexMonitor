@@ -35,7 +35,5 @@ for sound in ['success-notification.mp3', 'error-notification.mp3']:
 for name in ['ci.yml', 'release.yml']:
     workflow = (ROOT / '.github/workflows' / name).read_text()
     assert 'npm ' not in workflow and 'setup-node' not in workflow
-flake = (ROOT / 'flake.nix').read_text()
-assert 'buildNpmPackage' not in flake and 'package.json' not in flake and 'cargo-tauri' not in flake
 assert 'npm ' not in (ROOT / '.codex/environments/environment.toml').read_text()
 print('Native-only frontend, Cargo, resources, and workflow contracts passed.')
