@@ -159,10 +159,7 @@ impl ClientCallbacks {
             },
             // Interactive authentication is provided by ConnectionManager's
             // separate login PTY service, not the command-terminal callbacks.
-            "auth": {"terminal": cfg!(all(
-                feature = "acp-host-services",
-                not(any(target_os = "ios", target_os = "android"))
-            ))},
+            "auth": {"terminal": cfg!(feature = "acp-host-services")},
             "elicitation": {"url": {}},
             "session": {"compaction": {}}
         });
@@ -825,7 +822,7 @@ impl ClientCallbacks {
 }
 
 fn command_terminal_callbacks_enabled() -> bool {
-    cfg!(not(any(target_os = "ios", target_os = "android")))
+    true
 }
 
 enum MutationIntent {
@@ -1001,10 +998,7 @@ mod tests {
             assert!(capabilities.get("terminal").is_none());
             assert_eq!(
                 capabilities["auth"]["terminal"],
-                cfg!(all(
-                    feature = "acp-host-services",
-                    not(any(target_os = "ios", target_os = "android"))
-                ))
+                cfg!(feature = "acp-host-services")
             );
             fixture.cleanup();
         });

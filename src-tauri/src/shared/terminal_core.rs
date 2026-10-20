@@ -1,7 +1,6 @@
 //! Host-independent terminal process and emulator state.
 //!
-//! The process half is used by the existing Tauri command adapter and by the
-//! native desktop. The emulator half is only built for `native-gui`.
+//! The process half is used by the native desktop. The emulator half is only built for `native-gui`.
 
 use std::{
     io::Write,
@@ -9,28 +8,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(all(
-    any(feature = "tauri-host", feature = "native-gui"),
-    not(any(target_os = "ios", target_os = "android"))
-))]
+#[cfg(feature = "native-gui")]
 use std::{path::Path, sync::Arc};
 
-#[cfg(all(
-    any(feature = "tauri-host", feature = "native-gui"),
-    not(any(target_os = "ios", target_os = "android"))
-))]
+#[cfg(feature = "native-gui")]
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-#[cfg(all(
-    any(feature = "tauri-host", feature = "native-gui"),
-    not(any(target_os = "ios", target_os = "android"))
-))]
+#[cfg(feature = "native-gui")]
 use std::sync::Mutex;
 
-/// A PTY session without a dependency on Tauri or any window/event system.
-#[cfg(all(
-    any(feature = "tauri-host", feature = "native-gui"),
-    not(any(target_os = "ios", target_os = "android"))
-))]
+/// A PTY session without a dependency on any window/event system.
+#[cfg(feature = "native-gui")]
 pub(crate) struct TerminalSession {
     pub(crate) id: String,
     pub(crate) master: Mutex<Box<dyn MasterPty + Send>>,
@@ -38,10 +25,7 @@ pub(crate) struct TerminalSession {
     pub(crate) child: Mutex<Box<dyn Child + Send>>,
 }
 
-#[cfg(all(
-    any(feature = "tauri-host", feature = "native-gui"),
-    not(any(target_os = "ios", target_os = "android"))
-))]
+#[cfg(feature = "native-gui")]
 impl TerminalSession {
     /// Spawn the configured shell in a new PTY. Caller owns reader/event
     /// delivery; this type only owns the process and its controlling handles.

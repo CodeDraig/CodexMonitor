@@ -67,23 +67,19 @@ rg -n "multi_agent|max_threads|max_depth|AgentsToml|AgentRoleToml|config_file|ap
 1. Shared read/write core:
 - `src-tauri/src/shared/agents_config_core.rs`
 
-2. Tauri/app + daemon adapters (keep parity):
-- `src-tauri/src/codex/mod.rs`
-- `src-tauri/src/lib.rs`
-- `src-tauri/src/bin/codex_monitor_daemon.rs`
-- `src-tauri/src/bin/codex_monitor_daemon/rpc/codex.rs`
-- `src-tauri/src/remote_backend/mod.rs`
+2. Typed client and daemon adapters (keep parity):
+- `src-tauri/src/client/contracts.rs`
+- `src-tauri/src/client/local.rs`
+- `src-tauri/src/client/remote.rs`
+- `src-tauri/src/bin/codex_monitor_daemon/rpc/agents.rs`
 
-3. Frontend settings contracts + UI:
-- `src/services/tauri.ts`
-- `src/features/settings/hooks/useSettingsAgentsSection.ts`
-- `src/features/settings/hooks/useSettingsViewOrchestration.ts`
-- `src/features/settings/components/sections/SettingsAgentsSection.tsx`
-- `src/features/settings/components/sections/SettingsSectionContainers.tsx`
+3. Native settings and controller:
+- `src-tauri/src/desktop/workbench/settings.rs`
+- `src-tauri/src/desktop/controller.rs`
 
 4. Tests:
-- `src/services/tauri.test.ts`
-- `src/features/settings/components/SettingsView.test.tsx`
+- Shared core tests alongside `agents_config_core.rs`.
+- Native controller and daemon RPC tests.
 
 ## Sync Checklist
 
@@ -118,12 +114,12 @@ rg -n "multi_agent|max_threads|max_depth|AgentsToml|AgentRoleToml|config_file|ap
 If upstream introduces a hard max or materially changes spawn behavior, revisit this cap and update both:
 
 - `src-tauri/src/shared/agents_config_core.rs`
-- `src/features/settings/components/sections/SettingsAgentsSection.tsx`
+- `src-tauri/src/desktop/workbench/settings.rs`
 
 ## Validation Before Merge
 
-```bash
-npm run typecheck
-npm run test -- src/services/tauri.test.ts src/features/settings/components/sections/SettingsAgentsSection.test.tsx src/features/settings/components/SettingsView.test.tsx
-cd src-tauri && cargo check
+```sh
+python3 scripts/check-native-only.py
+cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
+cargo test --locked --no-default-features --features native-acceptance --all-targets --manifest-path src-tauri/Cargo.toml
 ```

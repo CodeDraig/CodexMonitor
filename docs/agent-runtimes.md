@@ -4,7 +4,7 @@ CodexMonitor uses the Codex app-server adapter and a shared ACP v1 adapter in bo
 
 ## Native desktop and backend client
 
-The native desktop is a Rust `eframe` application using `egui` with the `wgpu` renderer. Its entry point is `src-tauri/src/bin/codex_monitor_native.rs`; the shell and panels are under `src-tauri/src/desktop/`. The existing Tauri/WebKit frontend remains a separate host path, including the iOS work. Both desktop hosts call the same Rust shared cores and run store.
+The native desktop is a Rust `eframe` application using `egui` with the `wgpu` renderer. Its entry point is `src-tauri/src/bin/codex_monitor_native.rs`; the shell and panels are under `src-tauri/src/desktop/`. The desktop and daemon call the same Rust shared cores and run store.
 
 The native UI sends `BackendRequest` values through `BackendHandle` in `src-tauri/src/client/`. A request has a correlation UUID and a `BackendScope` identifying endpoint, connection epoch, and optional store. UI actions enqueue without waiting; the client thread owns a persistent Tokio runtime and runs independent request tasks so a pending ACP prompt or permission does not block cancellation or reads. Replies and ordered events return through the inbox with the originating scope. Stale-epoch replies/events are discarded. Explicit channel lag and daemon `resync-required` notifications trigger recovery from durable events and conversation history; a numeric gap in one session alone does not imply lost events because sessions share the store's sequence. A mutation with an uncertain transport result is not automatically resubmitted. The native header keeps the backend chooser and desktop services in the same menu row; narrow windows place host actions under **Panels**. A successful Stop removes the permission requests that were pending at cancellation, while preserving any newer request.
 
@@ -28,7 +28,7 @@ Schema 4 persists mutating callback receipts in `acp_callback_operations` and co
 
 Source-5 workspace behavior emits a `workspace_files_changed` notification after successful ACP file mutations so local and remote workspace views can refresh. The file panel refreshes filesystem and Git data, retains filtered results and the selected preview, and keeps the previous file contents visible when a later read is rejected or fails. A rejected callback-policy update leaves the prior policy intact. Nested terminal references in tool-patch content retain readable terminal output in both live updates and replay. Cached reads of an idle binding with no restored foreground connection remain neutral; they do not implicitly prepare an ACP connection. Host capability negotiation disables callbacks on unsupported mobile hosts.
 
-The implementation contracts are present in `src-tauri/src/shared/agent_runtime/`, including `connections.rs`, `client_callbacks.rs`, `client_files.rs`, `client_store.rs`, `client_terminals.rs`, and `login_terminal.rs`. Source-6 service fixture acceptance passed authentication, filesystem and terminal callbacks, cancel/follow-up, file-change events, replay protection, shutdown cleanup, migration, restart, and integrity scenarios. Source-6 native-gui all-target tests and the focused busy-cache polling regression passed; source-5 core/service/custom-protocol checks remain applicable because the shared backend is unchanged. Source-5 local/same-host-daemon generic-fixture UI callbacks passed. Source-6 local and same-host-daemon cached sessions reopened with saved history and terminal output; each path also passed the busy-session callback approval and follow-up probe. Source-5 daemon UI evidence separately confirms Files and Git refresh after ACP file changes. Snapshot-4 native UI acceptance passed bounded local and same-host daemon-backed Claude and Antigravity read/edit/printf flows, and both daemon conversations reopened after restart with ordered semantic history intact. Claude used provider-native tools and Antigravity used Monitor ACP callbacks. These native flows are not physical remote-host coverage. See [ACP agent integration acceptance](acp-agent-integration-acceptance.md) for receipt status and binary boundaries.
+The implementation contracts are present in `src-tauri/src/shared/agent_runtime/`, including `connections.rs`, `client_callbacks.rs`, `client_files.rs`, `client_store.rs`, `client_terminals.rs`, and `login_terminal.rs`. Source-6 service fixture acceptance passed authentication, filesystem and terminal callbacks, cancel/follow-up, file-change events, replay protection, shutdown cleanup, migration, restart, and integrity scenarios. Source-6 native-gui all-target tests and the focused busy-cache polling regression passed; core and host-service checks cover the shared backend; current native-only checks are listed below. Source-5 local/same-host-daemon generic-fixture UI callbacks passed. Source-6 local and same-host-daemon cached sessions reopened with saved history and terminal output; each path also passed the busy-session callback approval and follow-up probe. Source-5 daemon UI evidence separately confirms Files and Git refresh after ACP file changes. Snapshot-4 native UI acceptance passed bounded local and same-host daemon-backed Claude and Antigravity read/edit/printf flows, and both daemon conversations reopened after restart with ordered semantic history intact. Claude used provider-native tools and Antigravity used Monitor ACP callbacks. These native flows are not physical remote-host coverage. See [ACP agent integration acceptance](acp-agent-integration-acceptance.md) for receipt status and binary boundaries.
 
 The global browser lists cached sessions, discovers sessions across directories, searches titles and paths, filters by profile, and pages each source independently. A failed source retains its cached rows. Native cursors stay in memory on their discovery connection; stale or differently filtered cursors return an explicit error. Discovery connections never reload a foreground session. Object-valued capability markers, including `{}`, count as advertised capabilities.
 
@@ -76,7 +76,7 @@ Comparison writes retain every acknowledged revision in `comparison_revisions`. 
 
 ## Runtime command contract
 
-Desktop Tauri and daemon JSON-RPC expose `runtime_request` with `{method, input}` through `src-tauri/src/shared/runtime_rpc.rs`.
+The typed desktop client and daemon JSON-RPC expose `runtime_request` with `{method, input}` through `src-tauri/src/shared/runtime_rpc.rs`.
 
 | Method | Input and result |
 | --- | --- |
@@ -110,16 +110,14 @@ ACP prompt blocks follow negotiated ACP v1 content shapes. Codex images use `url
 ## Verification
 
 ```sh
-npm run typecheck
-npm run test
-npm run build
+python3 scripts/check-native-only.py
 cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
-cargo test --locked --features custom-protocol --manifest-path src-tauri/Cargo.toml
+cargo test --locked --no-default-features --features native-acceptance --all-targets --manifest-path src-tauri/Cargo.toml
 python3 scripts/test-runtime-store-contention.py
 ```
 
 The sustained runner uses separate desktop-library and daemon test executables for at least 62 seconds, mixes live execution/captures, repeated history generations, and comparison edits, and holds a writer lock beyond SQLite's busy timeout. It verifies acknowledged receipts, replay generations, immutable captures, comparison revisions, restart reads, foreign keys, and SQLite integrity.
 
-Both contention scripts build their test executables with `--no-default-features`, keeping Tauri/WebKit dependencies out of this backend check. Pass the already-built Rust test harnesses as `--desktop <lib-test-exe> --daemon <daemon-test-exe>` to skip Cargo entirely; `--daemon` alone reuses that daemon harness and builds only the library test executable. The `--daemon` argument here is the daemon's Rust test harness, because the contention worker is an ignored Rust test entry point, not the normal long-running daemon binary.
+Both contention scripts build their test executables with `--no-default-features`, keeping GUI dependencies out of this backend check. Pass the already-built Rust test harnesses as `--desktop <lib-test-exe> --daemon <daemon-test-exe>` to skip Cargo entirely; `--daemon` alone reuses that daemon harness and builds only the library test executable. The `--daemon` argument here is the daemon's Rust test harness, because the contention worker is an ignored Rust test entry point, not the normal long-running daemon binary.
 
 Real-agent protocol acceptance and provenance for Claude ACP, Gemini CLI, and Antigravity ACP is documented in [ACP agent integration acceptance](acp-agent-integration-acceptance.md); native eframe window, package, and interaction evidence is in [native egui acceptance](native-egui-acceptance.md). Generic ACP fixture conformance establishes shared protocol behavior, not acceptance of every agent, provider, operating system, or package.

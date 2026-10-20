@@ -761,7 +761,7 @@ async fn ensure_listen_addr_available(listen_addr: &str) -> Result<(), String> {
             Ok(())
         }
         Err(err) => Err(format!(
-            "Cannot start mobile access daemon because {listen_addr} is unavailable: {err}"
+            "Cannot start remote access daemon because {listen_addr} is unavailable: {err}"
         )),
     }
 }
@@ -1001,7 +1001,7 @@ async fn daemon_start(
     daemon_binary: &Path,
 ) -> Result<TcpDaemonStatus, String> {
     if !insecure_no_auth && token.is_none() {
-        return Err("Set a Remote backend token before starting mobile access daemon (or pass --insecure-no-auth for development).".to_string());
+        return Err("Set a Remote backend token before starting remote access daemon (or pass --insecure-no-auth for development).".to_string());
     }
 
     parse_port_from_remote_host(listen_addr)
@@ -1090,7 +1090,7 @@ async fn daemon_start(
         }
         DaemonProbe::NotDaemon => {
             return Err(format!(
-                "Cannot start mobile access daemon because {listen_addr} is already in use by another process."
+                "Cannot start remote access daemon because {listen_addr} is already in use by another process."
             ));
         }
         DaemonProbe::NotReachable => {}
@@ -1117,7 +1117,7 @@ async fn daemon_start(
 
     let child = command
         .spawn()
-        .map_err(|err| format!("Failed to start mobile access daemon: {err}"))?;
+        .map_err(|err| format!("Failed to start remote access daemon: {err}"))?;
 
     Ok(TcpDaemonStatus {
         state: TcpDaemonState::Running,

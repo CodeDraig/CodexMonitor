@@ -94,7 +94,7 @@ rpc_category!(PromptsRequest);
 rpc_category!(SettingsRequest);
 
 impl CodexRequest {
-    /// Set one Codex feature flag using the stable Tauri/daemon method shape.
+    /// Set one Codex feature flag using the stable desktop/daemon method shape.
     pub(crate) fn set_feature_flag(feature_key: impl Into<String>, enabled: bool) -> Self {
         Self::mutation(
             "set_codex_feature_flag",

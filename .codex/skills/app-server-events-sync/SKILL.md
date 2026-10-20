@@ -1,70 +1,33 @@
 ---
 name: app-server-events-sync
-description: Maintain CodexMonitor and Codex app-server protocol parity. Use when asked to audit supported or missing app-server notifications/requests, trace event routing, diagnose schema drift in app-server payloads, or update docs/app-server-events.md after upstream Codex changes.
+description: Maintain CodexMonitor and Codex app-server protocol parity. Use when asked to audit supported or missing app-server notifications/requests, trace event routing, diagnose schema drift, or update docs/app-server-events.md after upstream Codex changes.
 ---
 
-# App-Server Events Sync
+# App-server events sync
 
-Use this skill to keep CodexMonitor app-server integration accurate as the installed Codex CLI evolves.
+Use `docs/app-server-events.md` as the canonical protocol runbook.
 
-## Canonical Source
+1. Record the selected Codex executable's version and generate experimental schemas
+   into a fresh temporary directory. If `../Codex` exists, record its hash without
+   fetching, checking out, or pruning. The sibling checkout is optional.
+2. Compare notification and request method sets against the shared Rust transport,
+   native controller, typed client, and daemon RPC mappings. Keep stable and
+   experimental inventories distinct.
+3. Inspect payload schemas and Rust normalization when method lists are unchanged.
+4. Implement shared behavior in shared cores first, then client/daemon bindings,
+   native controller state, and rendering. Preserve app/daemon parity.
+5. Update supported/missing methods in the canonical runbook. State deliberate
+   non-support and concrete remaining acceptance gaps.
+6. Run the schema validator, focused behavioral tests, native-only boundary check,
+   Rust checks, and native controller tests. Native desktop acceptance is separate.
 
-Start with:
-- `docs/app-server-events.md`
+## Key files
 
-Treat that file as the canonical runbook and update it when behavior changes.
-
-## Workflow
-
-1. Confirm upstream baseline:
-- Record `codex --version` and generate experimental schemas into a fresh temporary directory. Use the selected executable as the compatibility target.
-- If `../Codex` exists, record its checked-out hash without fetching or pruning. A sibling checkout is optional.
-
-2. Compare notification methods:
-- Diff Codex v2 notification method set against CodexMonitor routing in `src/utils/appServerEvents.ts` and `src/features/app/hooks/useAppServerEvents.ts`.
-- Update `Supported Events` and `Missing Events` sections in `docs/app-server-events.md`.
-
-3. Compare request methods:
-- Diff Codex v2 client/server request sets against CodexMonitor outgoing and inbound handling.
-- Update `Supported Requests`, `Missing Client Requests`, and `Server Requests` sections.
-
-4. Investigate schema drift when lists look unchanged:
-- Inspect generated JSON schemas; if using upstream source, inspect `codex-rs/app-server-protocol/src/protocol/v2/`.
-- Compare parser and normalization edges in `src/utils/appServerEvents.ts`, `src/features/app/hooks/useAppServerEvents.ts`, and `src/features/threads/utils/threadNormalize.ts`.
-
-5. Implement support when requested:
-- Add method/type support at parsing edges first.
-- Route in app event hook.
-- Update thread/item reducers and rendering only if needed.
-- Keep app/daemon parity and avoid duplicated logic.
-
-6. Validate:
-- Run `python3 scripts/check-codex-protocol.py --schema-dir <generated-directory>` (Python jsonschema required).
-- Run targeted tests for touched files.
-- Run `npm run typecheck`.
-- Run `npm run test` for frontend behavior changes.
-- Run `cd src-tauri && cargo check` for backend changes.
-
-## Key Files
-
-- Routing/types: `src/utils/appServerEvents.ts`
-- Event router: `src/features/app/hooks/useAppServerEvents.ts`
-- Handler composition: `src/features/threads/hooks/useThreadEventHandlers.ts`
-- Item/turn handlers: `src/features/threads/hooks/useThreadItemEvents.ts`, `src/features/threads/hooks/useThreadTurnEvents.ts`
-- Normalization: `src/features/threads/utils/threadNormalize.ts`
-- State: `src/features/threads/hooks/useThreadsReducer.ts`
-- Outgoing requests: `src/services/tauri.ts`, `src-tauri/src/shared/codex_core.rs`
-- Daemon RPC: `src-tauri/src/bin/codex_monitor_daemon/rpc.rs` and `rpc/*`
-
-## References
-
-- Quick command set: `references/quick-commands.md`
-- Canonical runbook: `docs/app-server-events.md`
-
-## Output Expectations
-
-When asked for an audit or update:
-- Report concrete supported and missing method deltas.
-- Cite exact files that need edits.
-- Update `docs/app-server-events.md` in the same change when behavior changed.
-- Call out deliberate non-support explicitly (for example deprecated methods).
+- Transport and event routing: `src-tauri/src/backend/app_server.rs`, `backend/app_server/*`.
+- Shared requests/history: `src-tauri/src/shared/codex_core.rs`, `shared/codex_core/*`.
+- Typed client and event decoding: `src-tauri/src/client/*`.
+- Controller and hydration: `src-tauri/src/desktop/controller.rs`, `desktop/controller/*`.
+- Composer and permissions: `src-tauri/src/desktop/app/composer.rs`.
+- Content projection/rendering: `src-tauri/src/desktop/content.rs`, `desktop/content/*`.
+- Daemon RPC: `src-tauri/src/bin/codex_monitor_daemon/rpc.rs` and `rpc/*`.
+- Validation commands: `references/quick-commands.md`.

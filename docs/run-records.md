@@ -38,24 +38,23 @@ WAL stores must be shared on a local filesystem, not a network filesystem. Use S
 
 New runs require durable creation before external side effects. Existing untracked workspace/thread/message calls retain their original contracts. The optional `runContext` on tracked calls contains `runId` and `instanceId`.
 
-Run commands use an `input` envelope on both the Tauri and daemon surfaces:
+Run commands use an `input` envelope through the typed native client and daemon JSON-RPC surfaces:
 
 - `create_run`, `list_runs`, `get_run`, `update_run_metadata`
 - `record_run_setup`, `record_run_failure`, `reconcile_run`
 - `list_run_turns`, `capture_run_instance`, `get_run_capture`
 - `save_run_comparison`, `list_run_comparisons`
 
-`create_run` and manual capture request UUIDs are idempotent. Metadata and comparison writes require `expectedRevision`. Read the Rust contracts in `runs_core/types.rs` and the frontend contracts in `src/features/runs/types.ts` for payload fields.
+`create_run` and manual capture request UUIDs are idempotent. Metadata and comparison writes require `expectedRevision`. Read the Rust contracts in `runs_core/types.rs` and the native contracts in `src-tauri/src/client/contracts.rs` for payload fields.
 
 The app-server reader queues recording work for registered threads. History requires paginated full-item reads through `thread/turns/list`; servers without this capability return an error. A failed reconciliation read does not create a primary capture for an active turn. Database writes, paginated history reads, and Git capture execute outside the reader loop. The daemon continues recording when its client disconnects. When an app-server starts, it restores known run tracking and attempts history recovery. Unknown operation identities are never guessed from titles or prompt similarity.
 
 ## Validation
 
-Focused tests live in `runs_core/store/tests.rs`, `runs_core/recording_tests.rs`, `runs_core/contention_tests.rs`, `runs_core/capture.rs`, the daemon RPC tests, and `src/features/runs/`. The recorder tests use a deterministic subprocess fixture, including events emitted before launch responses. Git tests use temporary repositories and verify HEAD and index preservation.
+Focused tests live in `runs_core/store/tests.rs`, `runs_core/recording_tests.rs`, `runs_core/contention_tests.rs`, `runs_core/capture.rs`, the daemon RPC tests, and `src-tauri/src/desktop/workbench/runs.rs`. The recorder tests use a deterministic subprocess fixture, including events emitted before launch responses. Git tests use temporary repositories and verify HEAD and index preservation.
 
 ```sh
-npm run typecheck
-npm run test
+python3 scripts/check-native-only.py
 cd src-tauri
 cargo test --locked
 cargo check --locked

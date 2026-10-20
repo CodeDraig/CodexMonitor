@@ -41,15 +41,9 @@ pub(crate) struct LoginTerminalWriteAck {
 }
 
 pub(crate) struct LoginTerminals {
-    #[cfg(all(
-        feature = "acp-host-services",
-        not(any(target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(feature = "acp-host-services")]
     sessions: std::sync::Mutex<HashMap<String, Arc<pty::LoginSession>>>,
-    #[cfg(all(
-        feature = "acp-host-services",
-        not(any(target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(feature = "acp-host-services")]
     output_limit: usize,
 }
 
@@ -62,15 +56,9 @@ impl Default for LoginTerminals {
 impl LoginTerminals {
     pub(crate) fn new() -> Self {
         Self {
-            #[cfg(all(
-                feature = "acp-host-services",
-                not(any(target_os = "ios", target_os = "android"))
-            ))]
+            #[cfg(feature = "acp-host-services")]
             sessions: std::sync::Mutex::new(HashMap::new()),
-            #[cfg(all(
-                feature = "acp-host-services",
-                not(any(target_os = "ios", target_os = "android"))
-            ))]
+            #[cfg(feature = "acp-host-services")]
             output_limit: 1024 * 1024,
         }
     }
@@ -85,10 +73,7 @@ impl LoginTerminals {
         environment: &std::collections::BTreeMap<String, String>,
         cwd: &Path,
     ) -> Result<LoginTerminalInfo, String> {
-        #[cfg(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(feature = "acp-host-services")]
         {
             let operation_id = operation_id.into();
             if operation_id.is_empty() || executable.is_empty() {
@@ -119,10 +104,7 @@ impl LoginTerminals {
             sessions.insert(operation_id, session);
             Ok(info)
         }
-        #[cfg(not(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        )))]
+        #[cfg(not(feature = "acp-host-services"))]
         {
             let _ = (
                 operation_id.into(),
@@ -145,10 +127,7 @@ impl LoginTerminals {
         cursor: u64,
         limit: Option<u32>,
     ) -> Result<LoginTerminalOutput, String> {
-        #[cfg(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(feature = "acp-host-services")]
         {
             let session = self.session(operation_id, generation)?;
             Ok(session.read(
@@ -156,10 +135,7 @@ impl LoginTerminals {
                 limit.unwrap_or(64 * 1024).clamp(1, 256 * 1024) as usize,
             ))
         }
-        #[cfg(not(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        )))]
+        #[cfg(not(feature = "acp-host-services"))]
         {
             let _ = (operation_id, generation, cursor, limit);
             Err("Interactive ACP authentication terminals are unavailable in this build".into())
@@ -175,10 +151,7 @@ impl LoginTerminals {
         sequence: u64,
         input_base64: &str,
     ) -> Result<LoginTerminalWriteAck, String> {
-        #[cfg(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(feature = "acp-host-services")]
         {
             if input_base64.len() > 90 * 1024 {
                 return Err("Authentication terminal input exceeds the request limit".into());
@@ -192,10 +165,7 @@ impl LoginTerminals {
             let session = self.session(operation_id, generation)?;
             session.write(sequence, &input)
         }
-        #[cfg(not(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        )))]
+        #[cfg(not(feature = "acp-host-services"))]
         {
             let _ = (operation_id, generation, sequence, input_base64);
             Err("Interactive ACP authentication terminals are unavailable in this build".into())
@@ -209,18 +179,12 @@ impl LoginTerminals {
         columns: u16,
         rows: u16,
     ) -> Result<(), String> {
-        #[cfg(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(feature = "acp-host-services")]
         {
             self.session(operation_id, generation)?
                 .resize(columns, rows)
         }
-        #[cfg(not(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        )))]
+        #[cfg(not(feature = "acp-host-services"))]
         {
             let _ = (operation_id, generation, columns, rows);
             Err("Interactive ACP authentication terminals are unavailable in this build".into())
@@ -233,10 +197,7 @@ impl LoginTerminals {
         operation_id: &str,
         generation: u64,
     ) -> Result<LoginTerminalOutput, String> {
-        #[cfg(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(feature = "acp-host-services")]
         {
             let session = self.session(operation_id, generation)?;
             session.cancel(Duration::from_secs(3))?;
@@ -247,10 +208,7 @@ impl LoginTerminals {
                 .remove(operation_id);
             Ok(result)
         }
-        #[cfg(not(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        )))]
+        #[cfg(not(feature = "acp-host-services"))]
         {
             let _ = (operation_id, generation);
             Err("Interactive ACP authentication terminals are unavailable in this build".into())
@@ -264,19 +222,13 @@ impl LoginTerminals {
         operation_id: &str,
         generation: u64,
     ) -> Result<LoginTerminalOutput, String> {
-        #[cfg(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(feature = "acp-host-services")]
         {
             let session = self.session(operation_id, generation)?;
             session.cancel(Duration::from_secs(3))?;
             Ok(session.read(0, 256 * 1024))
         }
-        #[cfg(not(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        )))]
+        #[cfg(not(feature = "acp-host-services"))]
         {
             let _ = (operation_id, generation);
             Err("Interactive ACP authentication terminals are unavailable in this build".into())
@@ -286,10 +238,7 @@ impl LoginTerminals {
     /// Stop every login process owned by this service. Called when its backend
     /// runtime shuts down; command and conversation processes have separate owners.
     pub(crate) fn terminate_all(&self) -> Vec<String> {
-        #[cfg(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(feature = "acp-host-services")]
         {
             let sessions = match self.sessions.lock() {
                 Ok(mut sessions) => std::mem::take(&mut *sessions),
@@ -303,19 +252,13 @@ impl LoginTerminals {
             }
             failures
         }
-        #[cfg(not(all(
-            feature = "acp-host-services",
-            not(any(target_os = "ios", target_os = "android"))
-        )))]
+        #[cfg(not(feature = "acp-host-services"))]
         {
             Vec::new()
         }
     }
 
-    #[cfg(all(
-        feature = "acp-host-services",
-        not(any(target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(feature = "acp-host-services")]
     fn session(
         &self,
         operation_id: &str,
@@ -336,10 +279,7 @@ impl LoginTerminals {
     }
 }
 
-#[cfg(all(
-    feature = "acp-host-services",
-    not(any(target_os = "ios", target_os = "android"))
-))]
+#[cfg(feature = "acp-host-services")]
 mod pty {
     use super::*;
     use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -728,12 +668,7 @@ mod pty {
     }
 }
 
-#[cfg(all(
-    test,
-    feature = "acp-host-services",
-    unix,
-    not(any(target_os = "ios", target_os = "android"))
-))]
+#[cfg(all(test, feature = "acp-host-services", unix))]
 mod tests {
     use super::*;
     use std::{collections::BTreeMap, path::Path};
@@ -843,13 +778,7 @@ mod tests {
     }
 }
 
-#[cfg(all(
-    test,
-    not(all(
-        feature = "acp-host-services",
-        not(any(target_os = "ios", target_os = "android"))
-    ))
-))]
+#[cfg(all(test, not(feature = "acp-host-services")))]
 mod unavailable_tests {
     use super::*;
     #[test]

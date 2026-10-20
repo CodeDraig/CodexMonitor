@@ -1,10 +1,42 @@
 # Native egui desktop acceptance
 
+## Native-only source verification
+
+The current frontend is Rust/egui/eframe/wgpu. The application, daemon, and control
+utility build without the retired web frontend. Local Linux x86_64 verification
+on 2026-10-20 passed:
+
+| Gate | Result |
+| --- | --- |
+| Native-only source, lockfile, resources, workflow contract | Passed |
+| Host-independent library check | Passed |
+| Default native all-target check and binary build | Passed |
+| Native-acceptance suite | 932 passed, two opt-in contention tests ignored |
+| Headless ACP host-services suite | 655 passed, two opt-in contention tests ignored |
+| Build without ACP host-services | Unavailable-authentication-terminal test passed |
+| Sustained mixed-runtime contention | Passed, 65.67 seconds |
+| Sustained run-store contention | Passed, 1,000 comparison revisions and 500 capture items per process; SQLite integrity passed |
+| Native package self-test and custom-target-directory tests | Passed |
+| Rebuilt application, daemon, control utility `--help` | Passed |
+| Rebuilt native window smoke | Home rendered, About opened, normal close; isolated store integrity passed |
+
+The window smoke used the newly built debug executable with an explicit temporary
+data directory on X11. Computer-use could not bind its window; direct X11 window
+identity, screenshots, and mouse input supplied the smoke observation. It did not
+exercise new local/daemon conversations or establish macOS, Windows, or Nix package
+acceptance. Nix is unavailable on this host. Compiler unused/dead-code warnings
+remain visible. No test build was installed. Installation, live-data, launcher,
+plan, and unrelated-cache hashes were verified unchanged.
+
+The interaction records below are bound to their named executables and source
+revisions; they do not attest the current checkout. Temporary build and test
+artifacts are disposable and are not required to run an installed native package.
+
 This is the current acceptance record for the eframe desktop implementation. It distinguishes source/build validation, task-owned native interaction evidence, and remaining host checks. Evidence is retained under `.agent/egui-frontend-20261020T0217/`; prior attempts and immutable snapshots remain in place.
 
 ## Current build
 
-Snapshot 12 is the current source and packaged executable set. The full native test suite and most conversation checks used snapshot 11, which was built from a frozen source manifest containing 321 `src-tauri` files (`1dd62590d7d2a611465dc3f37d03bb39faf7734e7f80a599f38c0c135a76ddab`). Its native all-target Rust test run passed 805 tests with 2 ignored: library 497/1 ignored, daemon 278/1 ignored, daemonctl 29, and Tauri config 1. The all-target `native-gui` check and focused controller, store-open, replay, and header tests passed. Build command, exact counts, binary hashes, and source checks are recorded in `.agent/egui-frontend-20261020T0217/native-acceptance-snapshot-11/BUILD.txt`, `SHA256SUMS`, `SOURCE-SHA256SUMS`, and `SOURCE-VERIFY.txt`.
+The current checkout contains only the Rust frontend. The source and executable identifiers below bound the interaction evidence; they do not attest a different source revision. The full native test suite and most conversation checks used snapshot 11, which was built from a frozen source manifest containing 321 `src-tauri` files (`1dd62590d7d2a611465dc3f37d03bb39faf7734e7f80a599f38c0c135a76ddab`). Its native all-target Rust test run passed 805 tests with 2 ignored: library 497/1 ignored, daemon 278/1 ignored, daemonctl 29, and Tauri config 1. The all-target `native-gui` check and focused controller, store-open, replay, and header tests passed. Build command, exact counts, binary hashes, and source checks are recorded in `.agent/egui-frontend-20261020T0217/native-acceptance-snapshot-11/BUILD.txt`, `SHA256SUMS`, `SOURCE-SHA256SUMS`, and `SOURCE-VERIFY.txt`.
 
 | Binary | SHA-256 |
 |---|---|
@@ -16,7 +48,7 @@ Production package 11 uses `native-production-snapshot-11`, the same 321-file so
 
 After snapshot 11, one Windows-only source correction changed `Start-Process -LiteralPath` to `-FilePath` in `src-tauri/src/desktop/platform.rs`. Snapshot 12 contains that single source-file change (manifest SHA-256 `bc6fe8a2b992258b4a98a01399e72282269cb4b80aa0591d4b14915b5d63cdc7`) and passed the all-target native check. Its Linux GUI binary was relinked and has a different hash (`f0ce482597a47db564e96da4c35231f310373fce25ad387657230569e7cfc60a`); its daemon and daemonctl match snapshot 11. Production snapshot 12 GUI hash is `f838096675c37c2d29d245818151852d354c126472f79705a145f95e5e5457b5`; its daemon and daemonctl match production snapshot 11. Snapshot 12 did not rerun the 805/2 suite. Its native keyboard checks and production launcher checks are identified separately below; Windows runtime/cross-target acceptance was not run. Each result remains bound to its recorded binary. Production package 12 passed static validation and `gtk-launch` acceptance in a task-owned private D-Bus session on `:0`: exit code 0, exact running binary hash, visible Home window with Local backend and Desktop preferences/Settings for at least 10 seconds, clean isolated-store integrity, and graceful window-manager close. Full receipt and screenshots are in `.agent/egui-frontend-20261020T0217/native-package-artifacts-12-prod/validation-receipt.json` and `package12-prod-launch-20261020T0721/`. Snapshot 12 source receipt: `.agent/egui-frontend-20261020T0217/native-acceptance-snapshot-12/SOURCE-SHA256SUMS`.
 
-The tested display is Linux x86_64 under X11. The local and daemon acceptance runs used isolated task-owned data directories; OpenCode was exercised through public ACP using isolated XDG state. Codex CLI 0.162.1 and OpenCode 2.0.32 were available. Evidence with fake Codex and generic fake ACP fixtures is identified as fixture evidence. The installed Tauri/WebKitGTK app, its installation, and its data were not launched or changed. No Wayland, macOS, Windows, GPU acceleration, microphone recording, or screen-reader acceptance is claimed.
+The tested display is Linux x86_64 under X11. The local and daemon acceptance runs used isolated task-owned data directories; OpenCode was exercised through public ACP using isolated XDG state. Codex CLI 0.162.1 and OpenCode 2.0.32 were available. Evidence with fake Codex and generic fake ACP fixtures is identified as fixture evidence. The installation and live data are outside these isolated checks. No Wayland, macOS, Windows, GPU acceleration, microphone recording, or screen-reader acceptance is claimed.
 
 ## Accepted native interactions
 

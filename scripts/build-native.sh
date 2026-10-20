@@ -61,11 +61,19 @@ dependency_graph="$(cargo tree \
   --locked \
   --no-default-features \
   --features native-gui \
-  --edges normal,build)"
-if rg -n '(^|[[:space:]])(tauri|tauri-[[:alnum:]_-]*|wry|webkit2gtk|javascriptcore-rs)([[:space:]@]|$)' <<<"$dependency_graph"; then
-  echo "The native feature graph contains a Tauri or webview dependency" >&2
-  exit 1
-fi
+  --edges normal,build \
+  --prefix none)"
+while IFS= read -r dependency; do
+  dependency_name="${dependency%% *}"
+  case "$dependency_name" in
+    # notify-rust's Windows backend is independent of the retired webview host.
+    tauri-winrt-notification) ;;
+    tauri|tauri-*|wry|webkit2gtk|javascriptcore-rs)
+      echo "The native feature graph contains a webview host dependency: $dependency_name" >&2
+      exit 1
+      ;;
+  esac
+done <<<"$dependency_graph"
 
 echo "Building native app and shared daemon binaries ($profile)"
 cargo build "${cargo_args[@]}" \

@@ -679,11 +679,7 @@ fn default_review_delivery_mode() -> String {
 }
 
 fn default_backend_mode() -> BackendMode {
-    if cfg!(target_os = "ios") {
-        BackendMode::Remote
-    } else {
-        BackendMode::Local
-    }
+    BackendMode::Local
 }
 
 fn default_remote_backend_host() -> String {
@@ -1191,11 +1187,7 @@ mod tests {
     fn app_settings_defaults_from_empty_json() {
         let settings: AppSettings = serde_json::from_str("{}").expect("settings deserialize");
         assert!(settings.codex_bin.is_none());
-        let expected_backend_mode = if cfg!(target_os = "ios") {
-            BackendMode::Remote
-        } else {
-            BackendMode::Local
-        };
+        let expected_backend_mode = BackendMode::Local;
         assert!(matches!(
             (&settings.backend_mode, &expected_backend_mode),
             (BackendMode::Local, BackendMode::Local) | (BackendMode::Remote, BackendMode::Remote)

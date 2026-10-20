@@ -1158,10 +1158,10 @@ async fn play_notification_sound(sound: NotificationSound) -> Result<HostResultV
         use std::io::Cursor;
         let bytes: &'static [u8] = match sound {
             NotificationSound::Success => {
-                include_bytes!("../../../src/assets/success-notification.mp3")
+                include_bytes!("../../assets/success-notification.mp3")
             }
             NotificationSound::Error => {
-                include_bytes!("../../../src/assets/error-notification.mp3")
+                include_bytes!("../../assets/error-notification.mp3")
             }
         };
         let (_stream, stream_handle) = OutputStream::try_default()
@@ -1616,8 +1616,8 @@ mod tests {
         use rodio::{Decoder, Source};
         use std::io::Cursor;
         for bytes in [
-            include_bytes!("../../../src/assets/success-notification.mp3").as_slice(),
-            include_bytes!("../../../src/assets/error-notification.mp3").as_slice(),
+            include_bytes!("../../assets/success-notification.mp3").as_slice(),
+            include_bytes!("../../assets/error-notification.mp3").as_slice(),
         ] {
             // These bundled MPEG streams do not always expose a duration
             // estimate. Decode their complete sample stream instead.

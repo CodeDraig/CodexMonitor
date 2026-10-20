@@ -1,10 +1,2 @@
-mod commands;
-mod git;
-mod macos;
-mod settings;
-mod worktree;
-
-pub(crate) use commands::*;
-
-#[cfg(test)]
-mod tests;
+pub(crate) mod macos;
+pub(crate) mod settings;

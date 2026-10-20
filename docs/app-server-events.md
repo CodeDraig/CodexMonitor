@@ -307,14 +307,13 @@ Not implemented:
 
 ## Source map
 
-- Shared transport and initialization: `src-tauri/src/backend/app_server.rs`.
-- Shared requests and history: `src-tauri/src/shared/codex_core.rs`, `src-tauri/src/shared/codex_core/history.rs`.
-- App and daemon adapters: `src-tauri/src/codex/mod.rs`, `src-tauri/src/bin/codex_monitor_daemon.rs`, `src-tauri/src/bin/codex_monitor_daemon/rpc/codex.rs`.
-- IPC: `src/services/tauri.ts`; event fanout: `src/services/events.ts`.
-- Method inventory: `src/utils/appServerEvents.ts`; routing: `src/features/app/hooks/useAppServerEvents.ts`.
-- Requests: `useThreadApprovals.ts`, `useThreadApprovalEvents.ts`, `ApprovalToasts.tsx`, `ServerRequestForm.tsx`.
-- State and hydration: `useThreadActions.ts`, `useThreadsReducer.ts`, `threadReducer/threadItemsSlice.ts`.
-- Rendering conversion: `src/utils/threadItems.conversion.ts`; messages: `src/features/messages/components/Messages.tsx` and the item-specific row components alongside it.
+- Transport and initialization: `src-tauri/src/backend/app_server.rs`.
+- Shared requests and history: `src-tauri/src/shared/codex_core.rs` and `codex_core/*`.
+- Native request, reply, event, and transport boundary: `src-tauri/src/client/*`.
+- Native state, approvals, and hydration: `src-tauri/src/desktop/controller.rs`, `controller/*`.
+- Native composer and permission controls: `src-tauri/src/desktop/app/composer.rs`.
+- Rendering: `src-tauri/src/desktop/content.rs` and `content/*`.
+- Daemon bindings: `src-tauri/src/bin/codex_monitor_daemon/rpc.rs` and `rpc/*`.
 
 ## Refresh and verification
 
@@ -325,11 +324,9 @@ codex --version
 protocol_schema_dir=$(mktemp -d /tmp/codex-monitor-schema-XXXXXX)
 codex app-server generate-json-schema --experimental --out "$protocol_schema_dir"
 python3 scripts/check-codex-protocol.py --schema-dir "$protocol_schema_dir"
-npm run typecheck
-npm run test
-(cd src-tauri && cargo check --locked)
-npm run doctor:strict
-npm run tauri:build
+python3 scripts/check-native-only.py
+cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
+cargo test --locked --no-default-features --features native-acceptance --all-targets --manifest-path src-tauri/Cargo.toml
 ```
 
 The optional schema check requires Python `jsonschema`. It validates outgoing method names and the request/response fixtures in `tests/fixtures/app-server-contracts.json`; it does not replace behavioral tests or desktop acceptance. Stable and experimental schema inventories must be compared separately.

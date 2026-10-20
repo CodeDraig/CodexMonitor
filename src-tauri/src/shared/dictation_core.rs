@@ -1,4 +1,4 @@
-//! Tauri-independent microphone capture, Whisper model, and transcription core.
+//! Host-independent microphone capture, Whisper model, and transcription core.
 //! The host receives events through a channel and supplies the model directory.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};

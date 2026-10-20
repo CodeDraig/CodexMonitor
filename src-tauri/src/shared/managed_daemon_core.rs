@@ -1,5 +1,5 @@
 //! Host-independent managed TCP daemon and Tailscale operations shared by the
-//! Tauri and egui desktop adapters. Process paths and settings are supplied by
+//! native desktop and daemon clients. Process paths and settings are supplied by
 //! each host; this module owns the protocol, identity checks, and lifecycle.
 
 use std::{
@@ -157,7 +157,7 @@ pub(crate) async fn daemon_start(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            "Set a Remote backend token before starting mobile access daemon.".to_string()
+            "Set a Remote backend token before starting remote access daemon.".to_string()
         })?;
     let listen_addr = configured_daemon_listen_addr(settings);
     let listen_port = parse_port_from_remote_host(&listen_addr)
@@ -250,7 +250,7 @@ pub(crate) async fn daemon_start(
         }
         rpc_client::DaemonProbe::NotDaemon => {
             return Err(format!(
-                "Cannot start mobile access daemon because {listen_addr} is already in use by another process."
+                "Cannot start remote access daemon because {listen_addr} is already in use by another process."
             ));
         }
         rpc_client::DaemonProbe::NotReachable => {}
@@ -268,7 +268,7 @@ pub(crate) async fn daemon_start(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|err| format!("Failed to start mobile access daemon: {err}"))?;
+        .map_err(|err| format!("Failed to start remote access daemon: {err}"))?;
 
     runtime.status = TcpDaemonStatus {
         state: TcpDaemonState::Running,
@@ -481,7 +481,7 @@ async fn ensure_listen_addr_available(listen_addr: &str) -> Result<(), String> {
             Ok(())
         }
         Err(err) => Err(format!(
-            "Cannot start mobile access daemon because {listen_addr} is unavailable: {err}"
+            "Cannot start remote access daemon because {listen_addr} is unavailable: {err}"
         )),
     }
 }
