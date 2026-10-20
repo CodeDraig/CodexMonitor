@@ -1,3 +1,4 @@
+import MessageSquare from "lucide-react/dist/esm/icons/message-square";
 import { formatRelativeTime } from "../../../utils/time";
 import type { LatestAgentRun } from "../homeTypes";
 
@@ -61,6 +62,7 @@ export function HomeLatestAgentsSection({
         </div>
       ) : (
         <div className="home-latest-empty">
+          <MessageSquare className="home-empty-icon" aria-hidden="true" />
           <div className="home-latest-empty-title">No agent activity yet</div>
           <div className="home-latest-empty-subtitle">
             Start a thread to see the latest responses here.

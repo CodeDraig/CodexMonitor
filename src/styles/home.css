@@ -6,14 +6,16 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 20px;
+
+  gap: 32px;
   justify-content: flex-start;
   justify-self: stretch;
   align-self: stretch;
   max-width: none;
   margin: 0;
   text-align: left;
-  padding: calc(36px + var(--home-scroll-offset, 0px)) 32px 24px;
+
+  padding: calc(40px + var(--home-scroll-offset, 0px)) clamp(24px, 4vw, 64px) 40px;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -23,26 +25,31 @@
 }
 
 .app.layout-desktop .home > * {
-  width: min(100%, 720px);
+  width: min(100%, 1080px);
   margin-inline: auto;
 }
 
 .home-hero {
-  text-align: center;
+  text-align: left;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+
+  gap: 8px;
 }
 
 .home-title {
-  font-size: 44px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: 32px;
+
+  font-weight: 650;
+
+  letter-spacing: -0.035em;
+  line-height: 1.2;
 }
 
 .home-subtitle {
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text-muted);
+  line-height: 1.6;
 }
 
 .home-latest {
@@ -66,10 +73,14 @@
 }
 
 .home-section-title {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-faint);
+  font-size: 16px;
+
+  text-transform: none;
+
+  letter-spacing: -0.015em;
+
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 .home-section-meta {
@@ -155,7 +166,8 @@
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border-radius: 999px;
+
+  border-radius: 8px;
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
 }
@@ -164,11 +176,16 @@
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 4px 10px;
-  border-radius: 999px;
+
+  font-size: 12px;
+
+  text-transform: none;
+
+  letter-spacing: normal;
+
+  padding: 6px 12px;
+
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -233,10 +250,9 @@
 .home-usage-card {
   padding: 12px 14px;
   border-radius: 14px;
-  background: linear-gradient(135deg, rgba(98, 176, 255, 0.15), transparent 60%),
-    var(--surface-card);
+  background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.2);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -251,13 +267,11 @@
 }
 
 .home-usage-card.is-up {
-  background: linear-gradient(135deg, rgba(88, 190, 255, 0.18), transparent 58%),
-    var(--surface-card);
+  border-color: var(--border-accent-soft);
 }
 
 .home-usage-card.is-down {
-  background: linear-gradient(135deg, rgba(255, 177, 124, 0.16), transparent 58%),
-    var(--surface-card);
+  border-color: var(--border-strong);
 }
 
 .home-usage-label {
@@ -316,11 +330,9 @@
 .home-usage-chart-card {
   padding: 12px 14px;
   border-radius: 16px;
-  background:
-    radial-gradient(circle at top, rgba(62, 156, 255, 0.16), transparent 60%),
-    var(--surface-card);
+  background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: none;
 }
 
 .home-usage-chart-nav {
@@ -367,7 +379,7 @@
 .home-usage-chart-button:disabled {
   opacity: 0.38;
   cursor: default;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-card);
   color: var(--text-faint);
   border-color: var(--border-subtle);
   transform: none;
@@ -499,13 +511,21 @@
 }
 
 .home-usage-empty {
-  padding: 14px;
-  border-radius: 14px;
-  border: 1px dashed var(--border-subtle);
-  background: rgba(255, 255, 255, 0.02);
+  padding: 32px 24px;
+
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+
   display: flex;
+
   flex-direction: column;
-  gap: 6px;
+
+  gap: 8px;
+  min-height: 140px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
 }
 
 .home-usage-empty-title {
@@ -568,11 +588,9 @@
   position: relative;
   padding: 14px 14px 16px;
   border-radius: 16px;
-  background:
-    linear-gradient(135deg, rgba(100, 200, 255, 0.12), transparent 60%),
-    var(--surface-card);
+  background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: none;
   overflow: hidden;
   text-align: left;
 }
@@ -592,12 +610,12 @@
   width: 100%;
   color: inherit;
   font: inherit;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: background-color 140ms ease, border-color 140ms ease;
 }
 
 .home-latest-card-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+  background: var(--surface-control-hover);
+  border-color: var(--border-strong);
 }
 
 .home-latest-card-button:focus-visible {
@@ -658,10 +676,14 @@
 }
 
 .home-latest-label {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-faint);
+  font-size: 16px;
+
+  text-transform: none;
+
+  letter-spacing: -0.015em;
+
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 .home-latest-time {
@@ -713,10 +735,20 @@
 }
 
 .home-latest-empty {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
   display: flex;
+
   flex-direction: column;
-  gap: 6px;
+
+  gap: 8px;
   color: var(--text-subtle);
+  padding: 32px 24px;
+  border-radius: 10px;
+  min-height: 160px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
 }
 
 .home-latest-empty-title {
@@ -810,24 +842,24 @@
 }
 
 .home-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   width: 100%;
 }
 
 .home-button {
-  width: 100%;
+  width: auto;
   min-width: 0;
   justify-content: center;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 16px 20px;
-  border-radius: 18px;
-  font-size: 15px;
-  min-height: 56px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  min-height: 40px;
   white-space: nowrap;
 }
 
@@ -837,12 +869,25 @@
 }
 
 .home-actions .home-button {
-  background: var(--surface-card-strong);
-  color: inherit;
-  border: 1px solid var(--border-strong);
   box-shadow: none;
+}
+
+.home-actions .secondary {
+  background: var(--surface-control);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
 }
 
 .home-actions .home-button:disabled {
   opacity: 0.4;
+}
+
+.home-icon { width: 18px; height: 18px; stroke-width: 1.7; flex-shrink: 0; }
+
+.home-empty-icon {
+  width: 28px;
+  height: 28px;
+  stroke-width: 1.5;
+  color: var(--text-faint);
+  margin-bottom: 6px;
 }

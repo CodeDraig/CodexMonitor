@@ -5,9 +5,12 @@
   -webkit-app-region: no-drag;
   padding: 10px var(--main-panel-padding) 20px;
   border-top: 1px solid var(--cm-border-default);
-  background: var(--cm-surface-composer);
-  backdrop-filter: blur(18px) saturate(1.1);
-  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+
+  background: var(--surface-composer);
+
+  backdrop-filter: none;
+
+  -webkit-backdrop-filter: none;
   grid-column: 1;
   grid-row: 3;
 }
@@ -147,11 +150,16 @@
 .composer-input-area {
   position: relative;
   min-width: 0;
-  border: 1px solid var(--cm-border-heavy);
-  background: var(--cm-surface-panel-elevated);
-  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-card);
+  border-radius: 12px;
   padding: 10px 12px 10px 10px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.composer-input-area:focus-within {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 1px var(--border-accent-soft);
 }
 
 .composer-input-area.is-drag-over {

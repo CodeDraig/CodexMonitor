@@ -59,14 +59,14 @@ export function Home({
           Orchestrate agents across your local projects.
         </div>
       </div>
+      <HomeActions
+        onAddWorkspace={onAddWorkspace}
+        onAddWorkspaceFromUrl={onAddWorkspaceFromUrl}
+      />
       <HomeLatestAgentsSection
         latestAgentRuns={latestAgentRuns}
         isLoadingLatestAgents={isLoadingLatestAgents}
         onSelectThread={onSelectThread}
-      />
-      <HomeActions
-        onAddWorkspace={onAddWorkspace}
-        onAddWorkspaceFromUrl={onAddWorkspaceFromUrl}
       />
       <HomeUsageSection
         accountInfo={accountInfo}

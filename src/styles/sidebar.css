@@ -1,12 +1,14 @@
 .sidebar {
-  --sidebar-padding: 20px;
-  padding: var(--sidebar-top-padding, 36px) var(--sidebar-padding) 20px;
+  --sidebar-padding: 16px;
+
+  padding: var(--sidebar-top-padding, 28px) var(--sidebar-padding) 16px;
   background: var(--surface-sidebar);
   backdrop-filter: none;
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+
+  gap: 10px;
   -webkit-app-region: no-drag;
   min-height: 0;
   overflow: hidden;
@@ -432,6 +434,8 @@
 .sidebar-header .subtitle {
   margin-top: 0;
   line-height: 1.1;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .subtitle-button {
@@ -730,8 +734,10 @@
 .workspace-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 10px 12px;
+
+  gap: 8px;
+
+  padding: 10px 8px;
   border-radius: 0;
   border: none;
   background: transparent;
@@ -749,12 +755,14 @@
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 16px;
-  background: var(--cm-surface-panel-strong);
-  border: 1px solid var(--cm-border-default);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.02),
-    inset 0 0 0 0 rgba(255, 255, 255, 0);
+
+  border-radius: 8px;
+
+  background: transparent;
+
+  border: 1px solid transparent;
+
+  box-shadow: none;
   transition:
     background 0.2s ease,
     border-color 0.2s ease,
@@ -771,20 +779,23 @@
 }
 
 .workspace-row:hover::before {
-  background: color-mix(in srgb, var(--cm-surface-panel-hover) 78%, white);
-  border-color: var(--cm-border-default);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    inset 0 0 0 1px color-mix(in srgb, var(--cm-border-default) 42%, transparent);
+  background: var(--surface-hover);
+
+  border-color: transparent;
+
+  box-shadow: none;
 }
 
 .workspace-row.active::before {
-  background: var(--cm-surface-panel-active);
-  border-color: var(--cm-border-accent-strong);
+  background: transparent;
+
+  border-color: transparent;
 }
 
 .workspace-row.active .workspace-name {
   color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .workspace-copy {
@@ -832,9 +843,10 @@
 }
 
 .workspace-add {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
   border: 1px solid var(--border-stronger);
   background: var(--cm-surface-panel-loud);
   color: var(--text-muted);
@@ -845,7 +857,7 @@
   line-height: 1;
   -webkit-app-region: no-drag;
   flex-shrink: 0;
-  opacity: 0.46;
+  opacity: 0.8;
   transition:
     opacity 0.15s ease,
     background-color 0.15s ease,
@@ -1030,20 +1042,23 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px 10px calc(10px + var(--thread-indent, 0px));
-  border-radius: 14px;
-  background: var(--cm-surface-row);
+
+  padding: 10px 10px 10px calc(10px + var(--thread-indent, 0px));
+
+  border-radius: 8px;
+
+  background: transparent;
   border: 1px solid transparent;
   color: var(--text-quiet);
+
   font-size: 12px;
   text-align: left;
   cursor: pointer;
   -webkit-app-region: no-drag;
   min-width: 0;
   position: relative;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.02),
-    inset 0 0 0 0 rgba(255, 255, 255, 0);
+
+  box-shadow: none;
   transition:
     background-color 0.18s ease,
     border-color 0.18s ease,
@@ -1057,7 +1072,8 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+
+  box-shadow: none;
 }
 
 .thread-row.is-pinned {
@@ -1112,19 +1128,22 @@
 }
 
 .thread-row:hover {
-  background: color-mix(in srgb, var(--cm-surface-panel-hover) 76%, white);
-  border-color: var(--cm-border-default);
+  background: var(--surface-hover);
+
+  border-color: var(--border-subtle);
   color: var(--text-strong);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 0 0 1px color-mix(in srgb, var(--cm-border-default) 46%, transparent);
+
+  box-shadow: none;
+
   transform: none;
 }
 
 .thread-row.active {
-  background: color-mix(in srgb, var(--surface-active) 96%, transparent);
-  border-color: color-mix(in srgb, var(--border-accent) 42%, transparent);
+  background: var(--surface-active);
+
+  border-color: var(--border-accent-soft);
   color: var(--text-strong);
+  box-shadow: none;
 }
 
 .thread-content {

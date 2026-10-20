@@ -1,29 +1,45 @@
 @import "./themes.css";
 
 .app.reduced-transparency {
-  --surface-sidebar: rgba(18, 18, 18, 0.92);
-  --surface-sidebar-opaque: rgb(18, 18, 18);
-  --surface-topbar: rgba(10, 14, 20, 0.94);
-  --surface-right-panel: rgba(9, 12, 20, 0.92);
-  --surface-composer: rgba(10, 14, 20, 0.94);
-  --surface-messages: rgba(8, 10, 16, 0.94);
-  --surface-card: rgba(30, 32, 40, 0.94);
-  --surface-card-strong: rgba(38, 40, 48, 0.96);
-  --surface-card-muted: rgba(24, 26, 34, 0.9);
-  --surface-item: rgba(28, 30, 38, 0.88);
-  --surface-control: rgba(40, 44, 55, 0.7);
-  --surface-control-hover: rgba(54, 60, 72, 0.8);
-  --surface-control-disabled: rgba(40, 44, 55, 0.5);
-  --surface-hover: rgba(46, 50, 62, 0.7);
-  --surface-active: rgba(100, 200, 255, 0.18);
+  --surface-sidebar: #1a1e25;
+
+  --surface-sidebar-opaque: #1a1e25;
+
+  --surface-topbar: #1a1e25;
+
+  --surface-right-panel: #1a1e25;
+
+  --surface-composer: #14171c;
+
+  --surface-messages: #14171c;
+
+  --surface-card: #1d222a;
+
+  --surface-card-strong: #262d38;
+
+  --surface-card-muted: #20262f;
+
+  --surface-item: #1d222a;
+
+  --surface-control: #252c36;
+
+  --surface-control-hover: #303a47;
+
+  --surface-control-disabled: #20262f;
+
+  --surface-hover: #252c36;
+
+  --surface-active: #233b59;
   --surface-approval: rgba(12, 16, 26, 0.92);
   --surface-debug: rgba(12, 16, 26, 0.92);
   --surface-command: rgba(12, 14, 20, 0.95);
   --surface-diff-card: rgba(14, 18, 28, 0.9);
   --surface-bubble: rgba(42, 46, 58, 0.9);
   --surface-bubble-user: rgba(77, 153, 255, 0.55);
-  --surface-context-core: rgba(16, 20, 30, 0.96);
-  --surface-popover: rgba(16, 20, 30, 0.995);
+
+  --surface-context-core: #222831;
+
+  --surface-popover: #222831;
 }
 
 * {
@@ -51,7 +67,8 @@ body {
   width: 100vw;
   display: grid;
   grid-template-columns: var(--sidebar-width, 280px) 1fr;
-  background: transparent;
+
+  background: var(--surface-messages);
   border-radius: 0;
   overflow: hidden;
   position: relative;
@@ -82,6 +99,8 @@ body {
   --cm-border-accent-strong: color-mix(in srgb, var(--border-accent) 46%, transparent);
   transition: grid-template-columns 220ms ease;
   font-family: var(--ui-font-family);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .app.is-resizing,
@@ -278,5 +297,23 @@ button.window-caption-control:focus-visible,
   .home-usage-refresh-icon.spinning {
     animation-duration: var(--ds-spinner-dur) !important;
     animation-iteration-count: infinite !important;
+  }
+}
+
+/* Form chrome uses the same user-selected UI typeface as its surrounding app. */
+button, input, textarea, select {
+  font-family: inherit;
+}
+
+:where(button, input, textarea, select, summary, [tabindex="0"]):focus-visible {
+  outline: 2px solid var(--border-accent);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -1,3 +1,4 @@
+import { ChevronRight, Settings, TerminalSquare } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
 import { Sidebar } from "@app/components/Sidebar";
@@ -101,17 +102,17 @@ function NewAgentDialog({ workspace, runtime, onCodex, onClose }: {
       <h2>New agent</h2>
       <p>Choose an agent for {workspace.name}.</p>
       <p className="agent-creation-directory">{workspace.path}</p>
-      <button className="ghost" type="button" disabled={!!creating} onClick={() => void create(null)}>Codex</button>
+      <button className="ghost agent-creation-choice" type="button" disabled={!!creating} onClick={() => void create(null)}><TerminalSquare aria-hidden="true" /><span>Codex</span><ChevronRight aria-hidden="true" /></button>
       {runtime.profiles.filter(profile => profile.kind !== "codex").map(profile => <button
-        className="ghost" type="button" key={profile.id} disabled={loading || !!creating}
+        className="ghost agent-creation-choice" type="button" key={profile.id} disabled={loading || !!creating}
         onClick={() => void create(profile.id)}
-      >{profile.name} · ACP</button>)}
+      ><TerminalSquare aria-hidden="true" /><span>{profile.name} · ACP</span><ChevronRight aria-hidden="true" /></button>)}
       {loading && <p role="status">Loading agent profiles…</p>}
       {!loading && !error && runtime.profiles.every(profile => profile.kind === "codex") && <p>Add an ACP profile to use another agent.</p>}
       {creating && <p role="status">Creating agent…</p>}
       {error && <><p role="alert">{error}</p><button className="ghost" type="button" disabled={loading || !!creating} onClick={() => void refresh()}>Reload agent profiles</button></>}
-      <button className="ghost" type="button" disabled={!!creating} onClick={() => { onClose(); runtime.setBrowserOpen(true); }}>Manage agent profiles</button>
-      <button className="ghost" type="button" disabled={!!creating} onClick={onClose}>Cancel</button>
+      <div className="agent-creation-footer"><button className="ghost" type="button" disabled={!!creating} onClick={() => { onClose(); runtime.setBrowserOpen(true); }}><Settings size={16} aria-hidden="true" />Manage agent profiles</button>
+      <button className="ghost" type="button" disabled={!!creating} onClick={onClose}>Cancel</button></div>
     </div>
   </ModalShell>, document.body);
 }

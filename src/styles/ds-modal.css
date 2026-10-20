@@ -32,6 +32,9 @@
   left: 50%;
   transform: translate(-50%, -50%);
   animation: ds-modal-card-in var(--ds-dur-slow) var(--ds-ease-out) both;
+  border-radius: 12px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
 }
 
 .ds-modal :where(input, textarea, select):focus-visible {

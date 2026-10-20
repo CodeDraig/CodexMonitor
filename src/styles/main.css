@@ -356,7 +356,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px var(--main-panel-padding) 12px;
+
+  padding: 12px var(--main-panel-padding);
   border-bottom: 1px solid var(--cm-border-default);
   background: var(--cm-surface-topbar);
   -webkit-app-region: drag;
@@ -365,7 +366,8 @@
   position: sticky;
   top: 0;
   z-index: 3;
-  backdrop-filter: blur(18px) saturate(1.2);
+
+  backdrop-filter: none;
   min-height: var(--main-topbar-height);
   transition: padding-left 180ms ease, padding-right 180ms ease;
 }

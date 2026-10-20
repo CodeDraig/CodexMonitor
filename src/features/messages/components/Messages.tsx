@@ -1,3 +1,4 @@
+import MessageSquare from "lucide-react/dist/esm/icons/message-square";
 import { memo, useCallback } from "react";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down";
 import ChevronUp from "lucide-react/dist/esm/icons/chevron-up";
@@ -292,6 +293,7 @@ export const Messages = memo(function Messages({
         />
         {!items.length && !userInputNode && !isThinking && !isLoadingMessages && (
           <div className="empty messages-empty">
+            <MessageSquare aria-hidden="true" className="messages-empty-icon" />
             {threadId ? "Send a prompt to the agent." : "Send a prompt to start a new agent."}
           </div>
         )}

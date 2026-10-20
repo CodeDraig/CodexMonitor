@@ -1,3 +1,4 @@
+import { Download, Plus } from "lucide-react";
 type HomeActionsProps = {
   onAddWorkspace: () => void;
   onAddWorkspaceFromUrl: () => void;
@@ -14,9 +15,7 @@ export function HomeActions({
         onClick={onAddWorkspace}
         data-tauri-drag-region="false"
       >
-        <span className="home-icon" aria-hidden>
-          +
-        </span>
+        <Plus className="home-icon" aria-hidden="true" />
         Add Workspaces
       </button>
       <button
@@ -24,9 +23,7 @@ export function HomeActions({
         onClick={onAddWorkspaceFromUrl}
         data-tauri-drag-region="false"
       >
-        <span className="home-icon" aria-hidden>
-          ⤓
-        </span>
+        <Download className="home-icon" aria-hidden="true" />
         Add Workspace from URL
       </button>
     </div>

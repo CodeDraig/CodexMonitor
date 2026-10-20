@@ -1,3 +1,4 @@
+import ChartNoAxesColumn from "lucide-react/dist/esm/icons/chart-no-axes-column";
 import ChevronLeft from "lucide-react/dist/esm/icons/chevron-left";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
@@ -192,6 +193,7 @@ export function HomeUsageSection({
         </div>
       ) : showUsageEmpty ? (
         <div className="home-usage-empty">
+          <ChartNoAxesColumn className="home-empty-icon" aria-hidden="true" />
           <div className="home-usage-empty-title">No usage data yet</div>
           <div className="home-usage-empty-subtitle">
             Run a Codex session to start tracking local usage.

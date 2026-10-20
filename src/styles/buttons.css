@@ -5,13 +5,17 @@
 
 button {
   border: none;
-  border-radius: 10px;
+
+  border-radius: 8px;
   padding: 8px 14px;
   font-size: 13px;
-  font-weight: 600;
+
+  font-weight: 500;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease, filter 0.15s ease;
+
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
   -webkit-app-region: no-drag;
+  line-height: 1.4;
 }
 
 button:disabled {
@@ -20,9 +24,11 @@ button:disabled {
 }
 
 .primary {
-  background: linear-gradient(135deg, #62b7ff, #4fe3a3);
-  color: #0b0f1a;
-  box-shadow: 0 12px 22px var(--shadow-accent);
+  background: var(--button-primary-bg);
+
+  color: var(--button-primary-text);
+
+  box-shadow: none;
 }
 
 .secondary {
@@ -49,8 +55,9 @@ button:disabled {
 }
 
 button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 12px 18px rgba(0, 0, 0, 0.2);
+  transform: none;
+
+  box-shadow: none;
 }
 
 button:active:not(:disabled) {
