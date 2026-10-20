@@ -1,51 +1,100 @@
-#[cfg(desktop)]
+#[cfg(all(feature = "tauri-host", desktop))]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "tauri-host")]
 use tauri::Manager;
-#[cfg(desktop)]
+#[cfg(all(feature = "tauri-host", desktop))]
 use tauri::RunEvent;
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "tauri-host", target_os = "macos"))]
 use tauri::WindowEvent;
 
 mod backend;
+#[cfg(feature = "tauri-host")]
 mod codex;
+#[cfg(not(feature = "tauri-host"))]
+mod codex {
+    #[path = "../codex/args.rs"]
+    pub(crate) mod args;
+    #[path = "../codex/config.rs"]
+    pub(crate) mod config;
+    #[path = "../codex/home.rs"]
+    pub(crate) mod home;
+}
+#[cfg(any(feature = "tauri-host", feature = "native-gui"))]
 mod daemon_binary;
+#[cfg(feature = "tauri-host")]
 mod dictation;
+#[cfg(feature = "tauri-host")]
 mod event_sink;
+#[cfg(feature = "tauri-host")]
 mod files;
+#[cfg(feature = "tauri-host")]
 mod git;
 mod git_utils;
+#[cfg(feature = "tauri-host")]
 mod local_usage;
-#[cfg(desktop)]
+#[cfg(all(feature = "tauri-host", desktop))]
 mod menu;
-#[cfg(not(desktop))]
+#[cfg(all(feature = "tauri-host", not(desktop)))]
 #[path = "menu_mobile.rs"]
 mod menu;
+#[cfg(feature = "tauri-host")]
 mod notifications;
+#[cfg(feature = "tauri-host")]
 mod prompts;
+#[cfg(feature = "tauri-host")]
 mod remote_backend;
 mod rules;
+#[cfg(feature = "tauri-host")]
 mod runs;
+#[cfg(feature = "tauri-host")]
 mod runtime;
+#[cfg(feature = "tauri-host")]
 mod settings;
 mod shared;
+#[cfg(feature = "tauri-host")]
 mod state;
 mod storage;
+#[cfg(feature = "tauri-host")]
 mod tailscale;
-#[cfg(desktop)]
+#[cfg(all(feature = "tauri-host", desktop))]
 mod terminal;
-#[cfg(not(desktop))]
+#[cfg(all(feature = "tauri-host", not(desktop)))]
 #[path = "terminal_mobile.rs"]
 mod terminal;
+#[cfg(feature = "tauri-host")]
 mod tray;
 mod types;
 mod utils;
+#[cfg(feature = "tauri-host")]
 mod window;
+#[cfg(feature = "tauri-host")]
 mod workspaces;
+#[cfg(not(feature = "tauri-host"))]
+mod files {
+    #[path = "../files/io.rs"]
+    pub(crate) mod io;
+    #[path = "../files/ops.rs"]
+    pub(crate) mod ops;
+    #[path = "../files/policy.rs"]
+    pub(crate) mod policy;
+}
+#[cfg(not(feature = "tauri-host"))]
+mod workspaces {
+    #[path = "../workspaces/macos.rs"]
+    pub(crate) mod macos;
+    #[path = "../workspaces/settings.rs"]
+    pub(crate) mod settings;
+}
+pub(crate) mod client;
+#[cfg(feature = "native-gui")]
+pub(crate) mod desktop;
+#[cfg(feature = "tauri-host")]
+mod ui_state;
 
-#[cfg(desktop)]
+#[cfg(all(feature = "tauri-host", desktop))]
 static EXIT_CLEANUP_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
-#[cfg(desktop)]
+#[cfg(all(feature = "tauri-host", desktop))]
 fn keep_daemon_running_after_close(app_handle: &tauri::AppHandle) -> bool {
     let state = app_handle.state::<state::AppState>();
     tauri::async_runtime::block_on(async {
@@ -57,17 +106,19 @@ fn keep_daemon_running_after_close(app_handle: &tauri::AppHandle) -> bool {
     })
 }
 
-#[cfg(desktop)]
+#[cfg(all(feature = "tauri-host", desktop))]
 async fn stop_managed_daemons_for_exit(app_handle: tauri::AppHandle) {
     let state = app_handle.state::<state::AppState>();
     let _ = tailscale::tailscale_daemon_stop(state).await;
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 fn is_mobile_runtime() -> bool {
     cfg!(any(target_os = "ios", target_os = "android"))
 }
 
+#[cfg(feature = "tauri-host")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -116,7 +167,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            let state = state::AppState::load(&app.handle());
+            let state = state::AppState::load(&app.handle()).map_err(std::io::Error::other)?;
             app.manage(state);
             #[cfg(target_os = "macos")]
             {
@@ -195,7 +246,6 @@ pub fn run() {
             runs::get_run_capture,
             runs::save_run_comparison,
             runs::list_run_comparisons,
-
             settings::get_app_settings,
             settings::update_app_settings,
             settings::get_codex_config_path,
@@ -315,6 +365,7 @@ pub fn run() {
             notifications::is_macos_debug_build,
             notifications::app_build_type,
             notifications::send_notification_fallback,
+            ui_state::export_legacy_ui_state,
             tailscale::tailscale_status,
             tailscale::tailscale_daemon_command_preview,
             tailscale::tailscale_daemon_start,
@@ -350,4 +401,14 @@ pub fn run() {
             }
         }
     });
+}
+
+/// Start the native eframe application using an optional explicit data directory.
+#[cfg(feature = "native-gui")]
+pub fn run_native(data_dir: Option<std::path::PathBuf>) -> Result<(), String> {
+    let result = desktop::run(data_dir);
+    if let Err(error) = &result {
+        desktop::platform::show_startup_error_dialog("Codex Monitor could not start", error);
+    }
+    result
 }

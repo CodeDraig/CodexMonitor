@@ -1,12 +1,13 @@
 use super::*;
+use crate::backend::app_server::session::WorkspaceSession;
+use crate::shared::host_core::{CoreState, HostPaths};
 use crate::shared::process_core::kill_child_process_tree;
 use crate::shared::workspaces_core;
 use crate::storage::write_workspaces;
-use crate::types::WorkspaceKind;
-use crate::types::WorkspaceSettings;
+use crate::types::{AppSettings, WorkspaceEntry, WorkspaceKind, WorkspaceSettings};
 use serde_json::json;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -14,6 +15,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
+use tokio::sync::{broadcast, Mutex};
 
 fn run_async_test<F>(future: F)
 where
@@ -41,19 +43,15 @@ fn make_temp_dir(prefix: &str) -> PathBuf {
 
 fn test_state(data_dir: &std::path::Path) -> DaemonState {
     let (tx, _rx) = broadcast::channel::<DaemonEvent>(32);
+    let paths = HostPaths::from_data_dir(data_dir.to_path_buf()).expect("test host paths");
+    let core = CoreState::load(paths).expect("test core state");
     DaemonState {
-        runtime_registry: Default::default(),
+        core,
         data_dir: data_dir.to_path_buf(),
-        workspaces: Mutex::new(HashMap::new()),
-        sessions: Mutex::new(HashMap::new()),
-        storage_path: data_dir.join("workspaces.json"),
-        settings_path: data_dir.join("settings.json"),
-        app_settings: Mutex::new(AppSettings::default()),
         event_sink: DaemonEventSink {
             tx,
             run_store_path: data_dir.join("runs.sqlite3"),
         },
-        codex_login_cancels: Mutex::new(HashMap::new()),
         daemon_binary_path: Some("/tmp/codex-monitor-daemon".to_string()),
     }
 }

@@ -107,6 +107,33 @@ export async function exportMarkdownFile(
   return selection;
 }
 
+export type LegacyUiStateSnapshot = {
+  schemaVersion: 1;
+  exportedAtMs: number;
+  state: {
+    schemaVersion: 1;
+    revision: number;
+    panels: Record<string, number | boolean>;
+    collapsedGroups: Record<string, boolean>;
+    threadListSortKey: "created_at" | "updated_at" | null;
+    threadListOrganizeMode:
+      | "by_project"
+      | "by_project_activity"
+      | "threads_only"
+      | null;
+    pinnedThreads: Record<string, number>;
+    customNames: Record<string, string>;
+    threadCodexParams: Record<string, Record<string, unknown>>;
+    promptHistory: Record<string, string[]>;
+  };
+};
+
+export async function exportLegacyUiStateSnapshot(
+  snapshot: LegacyUiStateSnapshot,
+): Promise<{ path: string }> {
+  return invoke<{ path: string }>("export_legacy_ui_state", { snapshot });
+}
+
 export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
   try {
     return await invoke<WorkspaceInfo[]>("list_workspaces");

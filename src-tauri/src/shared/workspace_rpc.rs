@@ -21,6 +21,9 @@ pub(crate) struct ReadWorkspaceFileRequest {
     pub(crate) path: String,
 }
 
+/// Binary counterpart to `ReadWorkspaceFileRequest`, with the same camelCase JSON shape.
+pub(crate) type ReadWorkspaceFileBinaryRequest = ReadWorkspaceFileRequest;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetWorkspaceRuntimeCodexArgsRequest {

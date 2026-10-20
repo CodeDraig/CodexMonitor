@@ -1,7 +1,7 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import type {ThreadSummary,WorkspaceInfo} from "@/types";
 import {runtimeRequest} from "@services/tauri";
-import {subscribeRuntimeEvents} from "@services/events";
+import {subscribeBackendResync,subscribeRuntimeEvents} from "@services/events";
 import {acpRef,conversationKey} from "../conversationIdentity";
 import {conversationItems} from "../conversationProjection";
 import {projectRuntimeEvents} from "../projection";
@@ -117,10 +117,11 @@ export function useAcpConversations({backendKey,workspaces,activeThreadId,onOpen
     readRef.current=read;refreshRef.current=()=>replay(true);
     const start=async()=>{await read();if(valid())await replay();};void start();
     const unsubscribe=subscribeRuntimeEvents(e=>{if(e.storeId===ref.storeId&&e.sessionId===ref.sessionId){void read();if(e.kind==="session_info_update")void replay();}});
+    const unsubscribeResync=subscribeBackendResync(()=>{void read();void replay();});
     const poll=window.setInterval(()=>{void read();},1500);
     const fresh=window.setInterval(()=>{void replay();},30000);
     const focus=()=>{void replay();};window.addEventListener("focus",focus);document.addEventListener("visibilitychange",focus);
-    return()=>{++epoch.current;unsubscribe();window.clearInterval(poll);window.clearInterval(fresh);window.removeEventListener("focus",focus);document.removeEventListener("visibilitychange",focus);};
+    return()=>{++epoch.current;unsubscribe();unsubscribeResync();window.clearInterval(poll);window.clearInterval(fresh);window.removeEventListener("focus",focus);document.removeEventListener("visibilitychange",focus);};
   // Identity owns all requests, cursors, queues and permission epochs.
   },[key]);
   useEffect(()=>{if(pending&&executions.some(t=>t.executionId===pending&&["completed","failed","interrupted"].includes(t.execution)))setPending(null);},[pending,executions]);

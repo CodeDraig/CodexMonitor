@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import {runtimeRequest} from "@services/tauri";
-import {subscribeRuntimeEvents} from "@services/events";
+import {subscribeBackendResync,subscribeRuntimeEvents} from "@services/events";
 import type {ExecutionTicket,RuntimeEvent,RuntimeSession} from "../types";
 import {runtimeError} from "../types";
 export function useRuntimeConversation(session: RuntimeSession | null, backendKey: string) {
@@ -35,10 +35,11 @@ export function useRuntimeConversation(session: RuntimeSession | null, backendKe
     refresh.current = () => {void load();};
     // Events wake the durable cursor reader; never advance a cursor from a possibly gapped notification.
     const unsubscribe = subscribeRuntimeEvents(event => {if(event.storeId === session?.storeId && event.sessionId === session.sessionId) void load();});
+    const unsubscribeResync = subscribeBackendResync(() => {void load();});
     const timer = window.setInterval(() => {void load();},1500);
     const focus = () => {void load();};window.addEventListener("focus",focus);window.addEventListener("online",focus);
     void load();
-    return () => {++generation.current;unsubscribe();window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("online",focus);};
+    return () => {++generation.current;unsubscribe();unsubscribeResync();window.clearInterval(timer);window.removeEventListener("focus",focus);window.removeEventListener("online",focus);};
   },[key,session]);
   const reload = useCallback(() => refresh.current(),[]);
   return {events,executions,error,reload};

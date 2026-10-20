@@ -155,11 +155,9 @@ mod tests {
         copy_agents_md_from_parent_to_worktree, normalize_workspace_path_input,
         workspace_path_to_string, AGENTS_MD_FILE_NAME,
     };
+    use crate::codex::home::TEST_ENV_LOCK;
     use std::path::PathBuf;
-    use std::sync::Mutex;
     use uuid::Uuid;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn make_temp_dir() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("codex-monitor-{}", Uuid::new_v4()));
@@ -209,7 +207,9 @@ mod tests {
 
     #[test]
     fn normalize_workspace_path_input_expands_home_prefix() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
+        let _guard = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", "/tmp/cm-home");
 
@@ -235,10 +235,24 @@ mod tests {
 
 /// Refresh registrations made by another backend sharing this data directory.
 pub(crate) async fn sync_workspaces_from_storage_core(
-    storage_path:&std::path::PathBuf,
-    workspaces:&tokio::sync::Mutex<std::collections::HashMap<String,crate::types::WorkspaceEntry>>,
-    sessions:&tokio::sync::Mutex<std::collections::HashMap<String,std::sync::Arc<crate::backend::app_server::session::WorkspaceSession>>>,
-)->Result<(),String>{
-    let ids={let mut entries=workspaces.lock().await;let stored=crate::storage::read_workspaces(storage_path)?;let ids=stored.keys().cloned().collect();*entries=stored;ids};
-    super::connect::prune_workspace_sessions_core(sessions,&ids).await;Ok(())
+    storage_path: &std::path::PathBuf,
+    workspaces: &tokio::sync::Mutex<
+        std::collections::HashMap<String, crate::types::WorkspaceEntry>,
+    >,
+    sessions: &tokio::sync::Mutex<
+        std::collections::HashMap<
+            String,
+            std::sync::Arc<crate::backend::app_server::session::WorkspaceSession>,
+        >,
+    >,
+) -> Result<(), String> {
+    let ids = {
+        let mut entries = workspaces.lock().await;
+        let stored = crate::storage::read_workspaces(storage_path)?;
+        let ids = stored.keys().cloned().collect();
+        *entries = stored;
+        ids
+    };
+    super::connect::prune_workspace_sessions_core(sessions, &ids).await;
+    Ok(())
 }

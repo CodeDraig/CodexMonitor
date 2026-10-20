@@ -18,13 +18,20 @@ for line in sys.stdin:
  elif method=='session/list':
   rows=catalog()['sessions'];rows=[r for r in rows if not p.get('cwd') or r['cwd']==p['cwd']];offset=int(p.get('cursor','0'));page=rows[offset:offset+1]
   reply(i,{'sessions':[{k:v for k,v in s.items() if k not in ('updates','fail','slow','after')} for s in page],**({'nextCursor':str(offset+1)} if offset+1<len(rows) else {})})
- elif method in ('session/load','session/new'):
-  session=p.get('sessionId','new-fixture');row=next((s for s in catalog()['sessions'] if s['sessionId']==session),{})
+ elif method=='session/load':
+  session=p['sessionId'];row=next((s for s in catalog()['sessions'] if s['sessionId']==session),{})
   for u in row.get('updates',[]):update(session,u)
   if row.get('slow'):time.sleep(row['slow'])
   if row.get('fail'):emit({'jsonrpc':'2.0','id':i,'error':{'code':-32001,'message':'fixture failed after replay'}})
   else:reply(i,{'sessionId':session,'configOptions':[]})
   for u in row.get('after',[]):update(session,u)
+ elif method=='session/new':
+  # ACP creates a distinct conversation for each session/new request. Persist it
+  # so prompts, discovery, and later session/load calls use the returned identity.
+  session=f"new-fixture-{uuid.uuid4()}"
+  doc=catalog();doc.setdefault('sessions',[]).append({'sessionId':session,'cwd':p['cwd'],'title':session,'updates':[]})
+  source.write_text(json.dumps(doc))
+  reply(i,{'sessionId':session,'configOptions':[]})
  elif method=='session/prompt':
   s=p['sessionId'];doc=catalog();row=next((r for r in doc['sessions'] if r['sessionId']==s),None)
   updates=[]

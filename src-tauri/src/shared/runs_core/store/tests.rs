@@ -334,6 +334,180 @@ fn rollback_journal_upgrade_preserves_existing_records() {
 }
 
 #[test]
+fn synchronized_concurrent_first_opens_initialize_empty_and_migrate_seeded_store() {
+    const OPENERS: usize = 16;
+
+    // Repeated cold starts place many independent connections at the first
+    // journal-mode/schema transition, as desktop Profiles and Catalog do.
+    for _ in 0..4 {
+        let empty_path = path();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(OPENERS));
+        let handles = (0..OPENERS)
+            .map(|_| {
+                let path = empty_path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    Store::open(&path).map(|store| {
+                        let version = store
+                            .conn
+                            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+                            .unwrap();
+                        let integrity = store
+                            .conn
+                            .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                            .unwrap();
+                        (store.store_id.clone(), version, integrity)
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("first-open worker panicked"))
+            .collect::<Result<Vec<_>>>();
+        let opened = results.expect("all concurrent first opens must succeed");
+        assert_eq!(opened.len(), OPENERS);
+        assert!(opened
+            .iter()
+            .all(|(_, version, integrity)| { *version == 3 && integrity == "ok" }));
+        assert!(opened
+            .iter()
+            .all(|(store_id, _, _)| store_id == &opened[0].0));
+    }
+
+    // Also exercise concurrent first opens during a populated schema-2
+    // upgrade. Existing run/instance/attachment payload bytes must survive
+    // competing openers while only one of them performs the migration.
+    let migration_path = path();
+    let mut seeded = Store::open(&migration_path).unwrap();
+    let run = create(&mut seeded, &id());
+    let run_payload: String = seeded
+        .conn
+        .query_row("SELECT payload FROM runs WHERE id=?", [&run.id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let instance_payloads = run
+        .instances
+        .iter()
+        .map(|instance| {
+            seeded
+                .conn
+                .query_row(
+                    "SELECT payload FROM instances WHERE id=?",
+                    [&instance.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let attachment_payloads = run
+        .attachments
+        .iter()
+        .map(|attachment| {
+            seeded
+                .conn
+                .query_row(
+                    "SELECT data FROM attachments WHERE id=?",
+                    [attachment],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let store_id = seeded.store_id.clone();
+    seeded
+        .conn
+        .execute_batch(
+            "DROP TABLE conversation_attachments;
+             DROP TABLE conversation_items;
+             DROP TABLE conversation_snapshots;
+             DROP TABLE history_loads;
+             DROP TABLE conversation_aliases;
+             DROP TABLE session_catalog;
+             PRAGMA user_version=2;",
+        )
+        .unwrap();
+    drop(seeded);
+
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(OPENERS));
+    let handles = (0..OPENERS)
+        .map(|_| {
+            let path = migration_path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                Store::open(&path).map(|store| {
+                    let version = store
+                        .conn
+                        .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+                        .unwrap();
+                    let integrity = store
+                        .conn
+                        .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                        .unwrap();
+                    (store.store_id.clone(), version, integrity)
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let opened = handles
+        .into_iter()
+        .map(|handle| handle.join().expect("migration worker panicked"))
+        .collect::<Result<Vec<_>>>()
+        .expect("all concurrent schema-2 opens must succeed");
+    assert_eq!(opened.len(), OPENERS);
+    assert!(opened
+        .iter()
+        .all(|(_, version, integrity)| { *version == 3 && integrity == "ok" }));
+    assert!(opened
+        .iter()
+        .all(|(opened_id, _, _)| opened_id == &store_id));
+
+    let migrated = Store::open(&migration_path).unwrap();
+    assert_eq!(
+        migrated
+            .conn
+            .query_row("SELECT payload FROM runs WHERE id=?", [&run.id], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        run_payload
+    );
+    let migrated_instances = run
+        .instances
+        .iter()
+        .map(|instance| {
+            migrated
+                .conn
+                .query_row(
+                    "SELECT payload FROM instances WHERE id=?",
+                    [&instance.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let migrated_attachments = run
+        .attachments
+        .iter()
+        .map(|attachment| {
+            migrated
+                .conn
+                .query_row(
+                    "SELECT data FROM attachments WHERE id=?",
+                    [attachment],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(migrated_instances, instance_payloads);
+    assert_eq!(migrated_attachments, attachment_payloads);
+}
+
+#[test]
 fn only_sqlite_busy_is_classified_as_retryable_contention() {
     assert!(is_busy(&error(rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),

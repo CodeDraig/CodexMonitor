@@ -378,3 +378,7 @@ export function subscribeMenuComposerCycleCollaboration(
 
 const runtimeHub = createEventHub<import("@/features/runtime/types").RuntimeEvent>("runtime-event");
 export const subscribeRuntimeEvents = runtimeHub.subscribe;
+
+export type BackendResyncEvent = {stream?: string};
+const backendResyncHub = createEventHub<BackendResyncEvent>("backend-resync-required");
+export const subscribeBackendResync = backendResyncHub.subscribe;

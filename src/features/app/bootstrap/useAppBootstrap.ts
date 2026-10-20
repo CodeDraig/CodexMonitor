@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import { isMobilePlatform } from "@utils/platformPaths";
+import { exportLegacyUiState } from "@app/utils/exportLegacyUiState";
 import { useDebugLog } from "@/features/debug/hooks/useDebugLog";
 import { useAppSettingsController } from "@app/hooks/useAppSettingsController";
 import { useCodeCssVars } from "@app/hooks/useCodeCssVars";
@@ -6,6 +8,15 @@ import { useDictationController } from "@app/hooks/useDictationController";
 import { useLiquidGlassEffect } from "@app/hooks/useLiquidGlassEffect";
 
 export function useAppBootstrap() {
+  const legacyExportAttempted = useRef(false);
+  useEffect(() => {
+    if (isMobilePlatform() || legacyExportAttempted.current) return;
+    legacyExportAttempted.current = true;
+    void exportLegacyUiState().catch((error: unknown) => {
+      console.warn("Could not preserve legacy desktop presentation state", error);
+    });
+  }, []);
+
   const appSettingsState = useAppSettingsController();
   useCodeCssVars(appSettingsState.appSettings);
 

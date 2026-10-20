@@ -132,7 +132,9 @@ pub(crate) async fn dispatch_incoming_line(
             }
         }
         IncomingMessage::Notification { method, params } => match method.as_str() {
-            "runtime-event" => { let _ = app.emit("runtime-event", params); }
+            "runtime-event" => {
+                let _ = app.emit("runtime-event", params);
+            }
             "app-server-event" => {
                 let _ = app.emit("app-server-event", params);
             }
@@ -141,6 +143,9 @@ pub(crate) async fn dispatch_incoming_line(
             }
             "terminal-exit" => {
                 let _ = app.emit("terminal-exit", params);
+            }
+            "resync-required" | "backend-resync-required" => {
+                let _ = app.emit("backend-resync-required", params);
             }
             _ => {}
         },

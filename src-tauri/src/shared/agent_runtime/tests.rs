@@ -16,9 +16,14 @@ use std::{
 };
 use tokio::sync::Mutex;
 #[derive(Clone, Default)]
-pub(super) struct Sink(Arc<std::sync::Mutex<Vec<Value>>>, Arc<std::sync::Mutex<Vec<Value>>>);
+pub(super) struct Sink(
+    Arc<std::sync::Mutex<Vec<Value>>>,
+    Arc<std::sync::Mutex<Vec<Value>>>,
+);
 impl EventSink for Sink {
-    fn emit_app_server_event(&self, e: AppServerEvent) { self.1.lock().unwrap().push(e.message); }
+    fn emit_app_server_event(&self, e: AppServerEvent) {
+        self.1.lock().unwrap().push(e.message);
+    }
     fn emit_terminal_output(&self, _: TerminalOutput) {}
     fn emit_terminal_exit(&self, _: TerminalExit) {}
     fn emit_runtime_event(&self, e: Value) {
@@ -59,7 +64,8 @@ impl Fixture {
         };
         let mut s = Store::open(&p.join("runs.sqlite3")).unwrap();
         s.save_runtime_profile(
-            RuntimeProfile { working_directory: None,
+            RuntimeProfile {
+                working_directory: None,
                 id: "fixture".into(),
                 revision: 0,
                 name: "Fixture".into(),
@@ -302,7 +308,8 @@ fn migration_preserves_legacy_payloads_and_profile_cas() {
         .starts_with("runs.schema1-backup-")));
     drop(a);
     let mut a = Store::open(&p).unwrap();
-    let profile = RuntimeProfile { working_directory: None,
+    let profile = RuntimeProfile {
+        working_directory: None,
         id: "test".into(),
         revision: 0,
         name: "Test".into(),
@@ -333,7 +340,8 @@ fn runtime_profile_native_ids_are_scoped_and_owner_exit_is_uncertain() {
         native_session_id: "same-native-id".into(),
         workspace_id: "w".into(),
         cwd: "/tmp".into(),
-        profile: RuntimeProfile { working_directory: None,
+        profile: RuntimeProfile {
+            working_directory: None,
             id: "one".into(),
             revision: 1,
             name: "One".into(),
@@ -391,6 +399,15 @@ fn acp_rejects_unadvertised_inputs_and_versions() {
     for input in [json!({"type":"image","data":"abc","mimeType":"image/png"}),json!({"type":"audio","data":"abc"})] {
         assert!(f.rpc("submit",json!({"requestId":runs_core::id(),"sessionId":session["sessionId"],"prompt":[input]})).await.unwrap_err().starts_with("unsupported:"));
     }
+    // Configuration can arrive in the session result even when an older cached
+    // capability bit is false. The advertised option data remains authoritative.
+    let mut store = Store::open(&f.path).unwrap();
+    let mut persisted = store
+        .runtime_session(session["sessionId"].as_str().unwrap())
+        .unwrap();
+    assert!(persisted.configuration["configOptions"].is_array());
+    persisted.capabilities.configuration = false;
+    store.save_runtime_session(&persisted).unwrap();
     assert!(f.rpc("configure",json!({"sessionId":session["sessionId"],"optionId":"model","value":"invented"})).await.unwrap_err().contains("not advertised"));
     f.rpc("configure",json!({"sessionId":session["sessionId"],"optionId":"model","value":"fixture"})).await.unwrap();
     f.rpc("disconnect",json!({"sessionId":session["sessionId"]})).await.unwrap();
@@ -525,29 +542,82 @@ fn codex_started_delta_and_completed_items_capture_one_answer() {
         json!({"method":"item/agentMessage/delta","params":{"itemId":"answer","delta":"answer"}}),
         json!({"method":"item/completed","params":{"item":{"id":"answer","type":"agentMessage","text":"native answer"}}}),
     ];
-    let events:Vec<_> = raw.into_iter().enumerate().map(|(sequence,raw)| {
-        let (kind,payload)=projection::normalize(&RuntimeKind::Codex,&raw);
-        RuntimeEvent{history_load_id:None,schema_version:1,store_id:"store".into(),runtime:RuntimeRef{profile_id:"codex".into(),profile_revision:1,kind:RuntimeKind::Codex},session_id:"session".into(),execution_id:Some("execution".into()),sequence:sequence as u64,source:"live".into(),kind,payload,raw}
-    }).collect();
-    let items=projection::capture_items(&events);
-    assert_eq!(items.len(),1);
-    assert_eq!(items[0]["text"],"native answer");
-    assert_eq!(items[0]["type"],"agentMessage");
+    let events: Vec<_> = raw
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, raw)| {
+            let (kind, payload) = projection::normalize(&RuntimeKind::Codex, &raw);
+            RuntimeEvent {
+                history_load_id: None,
+                schema_version: 1,
+                store_id: "store".into(),
+                runtime: RuntimeRef {
+                    profile_id: "codex".into(),
+                    profile_revision: 1,
+                    kind: RuntimeKind::Codex,
+                },
+                session_id: "session".into(),
+                execution_id: Some("execution".into()),
+                sequence: sequence as u64,
+                source: "live".into(),
+                kind,
+                payload,
+                raw,
+            }
+        })
+        .collect();
+    let items = projection::capture_items(&events);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["text"], "native answer");
+    assert_eq!(items[0]["type"], "agentMessage");
     // Stream-only recovery still retains the accumulated text once.
-    assert_eq!(projection::capture_items(&events[..3])[0]["text"],"native answer");
+    assert_eq!(
+        projection::capture_items(&events[..3])[0]["text"],
+        "native answer"
+    );
 }
 
 #[test]
 fn codex_runtime_binds_notifications_before_delivering_creation_reply() {
- runtime().block_on(async {
-  let f=Fixture::new();
-  {let mut settings=f.settings.lock().await;settings.codex_bin=Some("python3".into());settings.codex_args=Some(format!("{}/src/shared/agent_runtime/fixtures/fake_codex.py",env!("CARGO_MANIFEST_DIR")));}
-  let session=f.rpc("create_session",json!({"workspaceId":"w","profileId":"codex"})).await.unwrap();
-  tokio::time::sleep(Duration::from_millis(100)).await;
-  assert!(!f.sink.1.lock().unwrap().iter().any(|v|v["method"]=="thread/started"));
-  let ticket=f.submit(&session,"single runtime path",None).await;
-  assert_eq!(f.terminal(&ticket).await.execution,ExecutionOutcome::Completed);
-  assert!(!f.sink.1.lock().unwrap().iter().any(|v|v["method"]=="item/completed"));
-  f.rpc("disconnect",json!({"sessionId":session["sessionId"]})).await.unwrap();
- });
+    runtime().block_on(async {
+        let f = Fixture::new();
+        {
+            let mut settings = f.settings.lock().await;
+            settings.codex_bin = Some("python3".into());
+            settings.codex_args = Some(format!(
+                "{}/src/shared/agent_runtime/fixtures/fake_codex.py",
+                env!("CARGO_MANIFEST_DIR")
+            ));
+        }
+        let session = f
+            .rpc(
+                "create_session",
+                json!({"workspaceId":"w","profileId":"codex"}),
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!f
+            .sink
+            .1
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|v| v["method"] == "thread/started"));
+        let ticket = f.submit(&session, "single runtime path", None).await;
+        assert_eq!(
+            f.terminal(&ticket).await.execution,
+            ExecutionOutcome::Completed
+        );
+        assert!(!f
+            .sink
+            .1
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|v| v["method"] == "item/completed"));
+        f.rpc("disconnect", json!({"sessionId":session["sessionId"]}))
+            .await
+            .unwrap();
+    });
 }

@@ -170,12 +170,13 @@ pub(crate) fn resolve_home_dir() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
+    use super::TEST_ENV_LOCK;
     use super::*;
     use crate::types::{WorkspaceKind, WorkspaceSettings, WorktreeInfo};
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn workspace_entry(kind: WorkspaceKind, path: &str) -> WorkspaceEntry {
         let worktree = if kind.is_worktree() {
@@ -199,7 +200,9 @@ mod tests {
     #[test]
     fn workspace_codex_home_uses_default_resolution() {
         let entry = workspace_entry(WorkspaceKind::Main, "/repo");
-        let _guard = ENV_LOCK.lock().expect("lock env");
+        let _guard = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let prev_codex_home = std::env::var("CODEX_HOME").ok();
         std::env::set_var("CODEX_HOME", "/tmp/codex-global");
@@ -215,7 +218,9 @@ mod tests {
 
     #[test]
     fn codex_home_expands_tilde_and_env_vars() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
+        let _guard = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let home_dir = std::env::temp_dir().join("codex-home-test");
         let home_str = home_dir.to_string_lossy().to_string();
 

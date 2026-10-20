@@ -87,7 +87,17 @@ fn generic_and_opencode_label_share_discovery_replay_and_main_contracts() {
         let third=f.rpc("discover_sessions",json!({"profileId":label,"cursor":next["nextCursor"]})).await.unwrap();assert!(f.rpc("attach_session",json!({"catalogId":third["sessions"][0]["catalogId"],"workspaceAssociation":{"kind":"add"}})).await.unwrap_err().contains("directory"));
         assert!(f.rpc("discover_sessions",json!({"profileId":label,"cursor":"stale"})).await.unwrap_err().contains("cursor expired"));
         let s=f.rpc("attach_session",json!({"catalogId":first["sessions"][0]["catalogId"],"workspaceAssociation":{"kind":"reuse","workspaceId":"w"}})).await.unwrap();
+        // Hold the agent's replay response past the ticket budget. This makes
+        // the assertion cover the intended contract (the ticket does not wait
+        // for session/load) instead of measuring an immediately-completing
+        // child process whose startup can vary with parallel daemon tests.
+        let catalog_path=f.path.with_file_name("catalog.json");
+        let mut catalog:Value=serde_json::from_slice(&std::fs::read(&catalog_path).unwrap()).unwrap();
+        catalog["sessions"][0]["slow"]=json!(2.0);
+        std::fs::write(&catalog_path,serde_json::to_vec(&catalog).unwrap()).unwrap();
         let request=runs_core::id();let start=Instant::now();let ticket=f.rpc("load_conversation_history",json!({"sessionId":s["sessionId"],"requestId":request})).await.unwrap();assert!(start.elapsed()<Duration::from_secs(1));
+        let pending=f.rpc("read_conversation",json!({"sessionId":s["sessionId"]})).await.unwrap();
+        assert_eq!(pending["load"]["state"],"loading","load ticket must precede the delayed session/load response");
         assert_eq!(ticket["id"],f.rpc("load_conversation_history",json!({"sessionId":s["sessionId"],"requestId":request})).await.unwrap()["id"]);
         let snapshot=wait_load(&f,&s["sessionId"]).await;assert_eq!(snapshot["coverage"],"agent_replay");assert_eq!(snapshot["load"]["state"],"complete");
         // Read the full generation after the immediately following live event commits.
@@ -98,6 +108,9 @@ fn generic_and_opencode_label_share_discovery_replay_and_main_contracts() {
         assert_eq!(items.iter().filter(|i|i["text"]=="LIVE_AFTER_BARRIER").count(),1);
         let events=f.rpc("events",json!({"sessionId":s["sessionId"]})).await.unwrap();assert!(events.as_array().unwrap().iter().filter(|e|e["source"]=="history").all(|e|e["executionId"].is_null()&&e["historyLoadId"]==ticket["id"]));assert_eq!(events.as_array().unwrap().last().unwrap()["source"],"live");
         let page=f.rpc("read_conversation",json!({"sessionId":s["sessionId"],"limit":2})).await.unwrap();assert_eq!(page["items"].as_array().unwrap().len(),2);assert!(page["nextCursor"].is_number());
+        let mut catalog:Value=serde_json::from_slice(&std::fs::read(&catalog_path).unwrap()).unwrap();
+        catalog["sessions"][0].as_object_mut().unwrap().remove("slow");
+        std::fs::write(&catalog_path,serde_json::to_vec(&catalog).unwrap()).unwrap();
         let second=f.rpc("load_conversation_history",json!({"sessionId":s["sessionId"],"requestId":runs_core::id()})).await.unwrap();assert_ne!(ticket["id"],second["id"]);wait_load(&f,&s["sessionId"]).await;wait_live(&f,&s["sessionId"]).await;
         let current=f.rpc("read_conversation",json!({"sessionId":s["sessionId"]})).await.unwrap();assert_ne!(current["generation"],snapshot["generation"]);
         let strip=|v:&Value|v.as_array().unwrap().iter().map(|v|{let mut v=v.clone();if v["id"].as_str().is_some_and(|id|id.contains(":")){v.as_object_mut().unwrap().remove("id");}v}).collect::<Vec<_>>();
@@ -190,13 +203,40 @@ fn discovery_capability_limits_and_profile_native_id_collisions_are_explicit() {
         let catalog = f.rpc("catalog", json!({})).await.unwrap();
         assert_eq!(catalog.as_array().unwrap().len(), 2);
         let cwd = f.path.parent().unwrap().to_string_lossy().to_string();
-        let unsupported = f.rpc("open_session_by_id",json!({"profileId":"limited","nativeSessionId":"same-native","cwd":cwd})).await.unwrap_err();
+        let unsupported = f
+            .rpc(
+                "open_session_by_id",
+                json!({"profileId":"limited","nativeSessionId":"same-native","cwd":cwd}),
+            )
+            .await
+            .unwrap_err();
         assert!(unsupported.starts_with("unsupported:"));
-        assert_eq!(f.rpc("catalog",json!({})).await.unwrap().as_array().unwrap().len(),2);
-        fixture(&f,"load-only",vec!["--no-list"]).await;
-        let by_id = f.rpc("open_session_by_id",json!({"profileId":"load-only","nativeSessionId":"same-native","cwd":cwd})).await.unwrap();
-        assert_eq!(by_id["nativeSessionId"],"same-native");
-        assert!(f.rpc("open_session_by_id",json!({"profileId":"load-only","nativeSessionId":"same-native","cwd":"relative"})).await.unwrap_err().starts_with("invalid_input:"));
+        assert_eq!(
+            f.rpc("catalog", json!({}))
+                .await
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        fixture(&f, "load-only", vec!["--no-list"]).await;
+        let by_id = f
+            .rpc(
+                "open_session_by_id",
+                json!({"profileId":"load-only","nativeSessionId":"same-native","cwd":cwd}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(by_id["nativeSessionId"], "same-native");
+        assert!(f
+            .rpc(
+                "open_session_by_id",
+                json!({"profileId":"load-only","nativeSessionId":"same-native","cwd":"relative"})
+            )
+            .await
+            .unwrap_err()
+            .starts_with("invalid_input:"));
         let p = f.rpc("profiles", json!({})).await.unwrap()["profiles"]
             .as_array()
             .unwrap()
@@ -423,8 +463,9 @@ fn concurrent_workspace_registration_merges_stale_backend_maps_and_preserves_unk
         let b_path = second.to_string_lossy().to_string();
         let (one, two) = futures_util::future::join(
             crate::shared::workspaces_core::register_workspace_core(&a_path, None, &a, &path),
-            crate::shared::workspaces_core::register_workspace_core(&b_path, None, &b, &path)
-        ).await;
+            crate::shared::workspaces_core::register_workspace_core(&b_path, None, &b, &path),
+        )
+        .await;
         let one = one.unwrap();
         let two = two.unwrap();
         assert_ne!(one.id, two.id);
@@ -436,8 +477,9 @@ fn concurrent_workspace_registration_merges_stale_backend_maps_and_preserves_unk
         );
         let (again, _) = futures_util::future::join(
             crate::shared::workspaces_core::register_workspace_core(&a_path, None, &b, &path),
-            crate::shared::workspaces_core::register_workspace_core(&b_path, None, &a, &path)
-        ).await;
+            crate::shared::workspaces_core::register_workspace_core(&b_path, None, &a, &path),
+        )
+        .await;
         assert_eq!(again.unwrap().id, one.id);
         assert!(f
             .path
@@ -456,20 +498,58 @@ fn concurrent_workspace_registration_merges_stale_backend_maps_and_preserves_unk
 #[test]
 fn completed_history_request_remains_idempotent_during_live_permission() {
     runtime().block_on(async {
-        let f=Fixture::new();let session=f.rpc("create_session",json!({"workspaceId":"w","profileId":"fixture"})).await.unwrap();
-        let request=runs_core::id();let input=json!({"sessionId":session["sessionId"],"requestId":request});
-        let load=f.rpc("load_conversation_history",input.clone()).await.unwrap();
-        assert_eq!(wait_load(&f,&session["sessionId"]).await["load"]["state"],"complete");
-        let execution=f.submit(&session,"permission",None).await;
-        tokio::time::timeout(Duration::from_secs(5),async {
+        let f = Fixture::new();
+        let session = f
+            .rpc(
+                "create_session",
+                json!({"workspaceId":"w","profileId":"fixture"}),
+            )
+            .await
+            .unwrap();
+        let request = runs_core::id();
+        let input = json!({"sessionId":session["sessionId"],"requestId":request});
+        let load = f
+            .rpc("load_conversation_history", input.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            wait_load(&f, &session["sessionId"]).await["load"]["state"],
+            "complete"
+        );
+        let execution = f.submit(&session, "permission", None).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if f.rpc("events",json!({"sessionId":session["sessionId"]})).await.unwrap().as_array().unwrap().iter().any(|e|e["kind"]=="permission"){break;}
+                if f.rpc("events", json!({"sessionId":session["sessionId"]}))
+                    .await
+                    .unwrap()
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|e| e["kind"] == "permission")
+                {
+                    break;
+                }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-        }).await.unwrap();
-        let duplicate=f.rpc("load_conversation_history",input).await.unwrap();assert_eq!(duplicate["id"],load["id"]);
-        assert!(f.rpc("load_conversation_history",json!({"sessionId":session["sessionId"],"requestId":runs_core::id()})).await.unwrap_err().starts_with("runtime_busy:"));
-        f.rpc("cancel",json!({"sessionId":session["sessionId"]})).await.unwrap();f.terminal(&execution).await;
-        f.rpc("disconnect",json!({"sessionId":session["sessionId"]})).await.unwrap();
+        })
+        .await
+        .unwrap();
+        let duplicate = f.rpc("load_conversation_history", input).await.unwrap();
+        assert_eq!(duplicate["id"], load["id"]);
+        assert!(f
+            .rpc(
+                "load_conversation_history",
+                json!({"sessionId":session["sessionId"],"requestId":runs_core::id()})
+            )
+            .await
+            .unwrap_err()
+            .starts_with("runtime_busy:"));
+        f.rpc("cancel", json!({"sessionId":session["sessionId"]}))
+            .await
+            .unwrap();
+        f.terminal(&execution).await;
+        f.rpc("disconnect", json!({"sessionId":session["sessionId"]}))
+            .await
+            .unwrap();
     });
 }

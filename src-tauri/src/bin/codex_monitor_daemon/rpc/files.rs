@@ -4,7 +4,9 @@ use crate::file_policy;
 use crate::shared::files_core;
 use crate::shared::workspace_files_core::list_workspace_files_inner;
 use crate::shared::workspace_files_core::read_workspace_file_inner;
+use crate::shared::workspace_files_core::read_workspace_file_binary_inner;
 use crate::shared::workspace_files_core::WorkspaceFileResponse;
+use crate::shared::workspace_files_core::WorkspaceFileBinaryResponse;
 use crate::shared::workspace_rpc;
 use crate::shared::workspaces_core;
 use crate::DaemonState;
@@ -51,6 +53,16 @@ pub(super) async fn try_handle(
             Some(
                 serialize_result(state.read_workspace_file(request.workspace_id, request.path))
                     .await,
+            )
+        }
+        "read_workspace_file_binary" => {
+            let request =
+                parse_request_or_err!(params, workspace_rpc::ReadWorkspaceFileBinaryRequest);
+            Some(
+                serialize_result(
+                    state.read_workspace_file_binary(request.workspace_id, request.path),
+                )
+                .await,
             )
         }
         "file_read" => {
@@ -107,6 +119,20 @@ impl DaemonState {
             &workspace_id,
             &path,
             |root, rel_path| read_workspace_file_inner(root, rel_path),
+        )
+        .await
+    }
+
+    pub(crate) async fn read_workspace_file_binary(
+        &self,
+        workspace_id: String,
+        path: String,
+    ) -> Result<WorkspaceFileBinaryResponse, String> {
+        workspaces_core::read_workspace_file_core(
+            &self.workspaces,
+            &workspace_id,
+            &path,
+            |root, rel_path| read_workspace_file_binary_inner(root, rel_path),
         )
         .await
     }

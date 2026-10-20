@@ -1,13 +1,13 @@
-use crate::events::DaemonEvent;
 use crate::DaemonState;
+use crate::events::DaemonEvent;
 use serde::Serialize;
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 use std::future::Future;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::Semaphore;
 
 fn serialize_value<T: Serialize>(value: T) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|err| err.to_string())
@@ -73,6 +73,10 @@ fn build_event_notification(event: DaemonEvent) -> Option<String> {
         DaemonEvent::TerminalExit(payload) => json!({
             "method": "terminal-exit",
             "params": payload,
+        }),
+        DaemonEvent::ResyncRequired { stream } => json!({
+            "method": "resync-required",
+            "params": {"stream": stream},
         }),
     };
     serde_json::to_string(&payload).ok()
@@ -184,7 +188,17 @@ pub(super) async fn forward_events(
     loop {
         let event = match rx.recv().await {
             Ok(event) => event,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                let Some(payload) = build_event_notification(DaemonEvent::ResyncRequired {
+                    stream: "all".into(),
+                }) else {
+                    continue;
+                };
+                if out_tx_events.send(payload).is_err() {
+                    break;
+                }
+                continue;
+            }
             Err(broadcast::error::RecvError::Closed) => break,
         };
 
@@ -252,3 +266,23 @@ mod turns;
 mod usage;
 #[path = "rpc/workspace.rs"]
 mod workspace;
+
+#[cfg(test)]
+mod event_notification_tests {
+    use super::build_event_notification;
+    use crate::events::DaemonEvent;
+    use serde_json::json;
+
+    #[test]
+    fn resync_notification_uses_the_shared_wire_method() {
+        let line = build_event_notification(DaemonEvent::ResyncRequired {
+            stream: "all".into(),
+        })
+        .expect("resync event should serialize");
+        let message: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            message,
+            json!({"method":"resync-required","params":{"stream":"all"}})
+        );
+    }
+}

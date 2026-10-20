@@ -200,9 +200,7 @@ impl RuntimeRegistry {
                     .or_else(|| response["sessionId"].as_str().map(str::to_string))
                     .ok_or("runtime_error: ACP session ID missing")?;
                 session.configuration = response.clone();
-                session.capabilities.configuration = response.get("configOptions").is_some()
-                    || response.get("modes").is_some()
-                    || response.get("models").is_some();
+                session.capabilities.configuration = configuration_available(&response);
                 let forward = events.clone();
                 tokio::spawn(async move {
                     while let Some(v) = wire.recv().await {
@@ -587,7 +585,9 @@ impl RuntimeRegistry {
             move |s| s.runtime_session(&id)
         })
         .await?;
-        if !current.capabilities.configuration {
+        // Older persisted sessions and agents that advertise configuration only in
+        // session/update may have options without the cached boolean being set.
+        if !current.capabilities.configuration && !configuration_available(&current.configuration) {
             return Err("unsupported: session configuration unavailable".into());
         }
         let response = if let Some(options) = current.configuration["configOptions"].as_array() {
@@ -651,12 +651,18 @@ impl RuntimeRegistry {
         } else {
             response.clone()
         };
+        saved.capabilities.configuration = configuration_available(&saved.configuration);
         persist(path, move |s| s.save_runtime_session(&saved)).await?;
         Ok(response)
     }
     pub async fn disconnect(&self, path: PathBuf, id: &str) -> Result<(), String> {
         // A failed initial replay is still a connection that can be released.
-        let b = self.bindings.lock().await.get(id).cloned()
+        let b = self
+            .bindings
+            .lock()
+            .await
+            .get(id)
+            .cloned()
             .ok_or("not_found: session is not connected on this backend")?;
         let sid = id.to_string();
         if with_store(path.clone(), move |s| {
@@ -976,6 +982,8 @@ async fn drive<E: EventSink>(
                 if let Some(v) = update.get("currentModeId") {
                     session.configuration["modes"]["currentModeId"] = v.clone();
                 }
+                session.capabilities.configuration =
+                    configuration_available(&session.configuration);
                 s.save_runtime_session(&session)
             })
             .await?;
@@ -1099,6 +1107,14 @@ fn configuration_revision(value: &str) -> u64 {
     value.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     }) & ((1u64 << 53) - 1)
+}
+
+fn configuration_available(configuration: &Value) -> bool {
+    ["configOptions", "modes", "models"].iter().any(|key| {
+        configuration
+            .get(*key)
+            .is_some_and(|value| !value.is_null())
+    })
 }
 
 struct Discovery {
@@ -1229,9 +1245,12 @@ impl RuntimeRegistry {
             return Err("unsupported: Codex history uses its native thread adapter".into());
         }
         let _guard = self.connect_lock.lock().await;
-        let permission_pending = if let Some(b) = self.bindings.lock().await.get(&session.session_id) {
-            !b.permissions.lock().await.is_empty()
-        } else { false };
+        let permission_pending =
+            if let Some(b) = self.bindings.lock().await.get(&session.session_id) {
+                !b.permissions.lock().await.is_empty()
+            } else {
+                false
+            };
         let sid = session.session_id.clone();
         let owner = self.owner.clone();
         let (ticket, start) = persist(path.clone(), move |s| {
@@ -1286,7 +1305,14 @@ impl RuntimeRegistry {
                     .unwrap_or(&session.cwd),
             )
             .await?;
+            let cached_configuration = session.configuration.clone();
+            let cached_configuration_available = session.capabilities.configuration
+                || configuration_available(&cached_configuration);
             session.capabilities = acp_capabilities(&client.initialization);
+            // Loading a conversation should not erase configuration negotiated and
+            // persisted by an earlier successful load if this replay later fails.
+            session.configuration = cached_configuration;
+            session.capabilities.configuration = cached_configuration_available;
             session.agent_info = client.initialization.clone();
             let saved = session.clone();
             persist(path.clone(), move |s| s.save_runtime_session(&saved)).await?;
@@ -1340,9 +1366,7 @@ impl RuntimeRegistry {
         persist(path, move |s| {
             let mut session = s.runtime_session(&sid)?;
             session.configuration = response.clone();
-            session.capabilities.configuration = response.get("configOptions").is_some()
-                || response.get("modes").is_some()
-                || response.get("models").is_some();
+            session.capabilities.configuration = configuration_available(&response);
             s.save_runtime_session(&session)
         })
         .await?;

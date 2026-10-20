@@ -1,4 +1,8 @@
-use crate::shared::runs_core::{self, store::with_store, types::{RunContext, OperationDisposition}};
+use crate::shared::runs_core::{
+    self,
+    store::with_store,
+    types::{OperationDisposition, RunContext},
+};
 use serde_json::json;
 use std::collections::HashMap;
 use std::future::Future;
@@ -22,6 +26,15 @@ use super::helpers::{
     copy_agents_md_from_parent_to_worktree, normalize_setup_script, workspace_path_to_string,
     worktree_setup_marker_path, AGENTS_MD_FILE_NAME,
 };
+
+fn requested_run_starts_codex(requested: &serde_json::Value) -> bool {
+    !matches!(
+        requested
+            .pointer("/runtime/kind")
+            .and_then(serde_json::Value::as_str),
+        Some("open_code_acp" | "acp")
+    )
+}
 
 pub(crate) async fn worktree_setup_status_core(
     workspaces: &Mutex<HashMap<String, WorkspaceEntry>>,
@@ -139,7 +152,10 @@ where
 
     let tracking = if let Some(context) = run_context {
         let path = runs_core::db_path(storage_path);
-        let ctx = context.clone(); let parent = parent_id.clone(); let branch_input = branch.clone(); let name_input = name.clone();
+        let ctx = context.clone();
+        let parent = parent_id.clone();
+        let branch_input = branch.clone();
+        let name_input = name.clone();
         let operation = with_store(path.clone(), move |store| {
             store.validate_context(&ctx)?;
             let run = store.get_run(&ctx.run_id)?;
@@ -152,7 +168,9 @@ where
             OperationDisposition::Unresolved { .. } => return Err("Worktree creation is unresolved; inspect its reserved path before creating a new run".into()),
             OperationDisposition::Execute { id } => Some((path,context,id,operation.1)),
         }
-    } else { None };
+    } else {
+        None
+    };
 
     // Determine worktree root: per-workspace setting > global setting > default
     let worktree_root = if let Some(custom_folder) = &parent_entry.settings.worktrees_folder {
@@ -180,14 +198,36 @@ where
     let repo_path = PathBuf::from(&parent_entry.path);
     let workspace_id = Uuid::new_v4().to_string();
     let branch_exists = git_branch_exists(&repo_path, &branch).await?;
-    if let Some((path,context,_,base)) = &tracking {
-        let instance_id=context.instance_id.clone(); let reserved_id=workspace_id.clone(); let reserved_path=stored_worktree_path.clone(); let reserved_branch=branch.clone();
-        with_store(path.clone(),move |store| store.update_instance(&instance_id,|i| {
-            i.workspace_id=Some(reserved_id); i.workspace_path=Some(reserved_path); i.preparation="creating_worktree".into();
-            i.baseline=json!({"reservedBranch":reserved_branch}); Ok(())
-        })).await?;
-        if branch_exists { return Err("Recorded worktree branch already exists; refusing to adopt it".into()); }
-        run_git_command(&repo_path,&["worktree","add","-b",&branch,&worktree_path_string,base]).await?;
+    if let Some((path, context, _, base)) = &tracking {
+        let instance_id = context.instance_id.clone();
+        let reserved_id = workspace_id.clone();
+        let reserved_path = stored_worktree_path.clone();
+        let reserved_branch = branch.clone();
+        with_store(path.clone(), move |store| {
+            store.update_instance(&instance_id, |i| {
+                i.workspace_id = Some(reserved_id);
+                i.workspace_path = Some(reserved_path);
+                i.preparation = "creating_worktree".into();
+                i.baseline = json!({"reservedBranch":reserved_branch});
+                Ok(())
+            })
+        })
+        .await?;
+        if branch_exists {
+            return Err("Recorded worktree branch already exists; refusing to adopt it".into());
+        }
+        run_git_command(
+            &repo_path,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                &branch,
+                &worktree_path_string,
+                base,
+            ],
+        )
+        .await?;
     } else if branch_exists {
         run_git_command(
             &repo_path,
@@ -251,21 +291,35 @@ where
 
     let start_codex = if let Some((path, context, _, _)) = &tracking {
         let instance_id = context.instance_id.clone();
-        with_store(path.clone(), move |store| Ok(store.instance(&instance_id)?.requested.pointer("/runtime/kind").and_then(serde_json::Value::as_str) != Some("open_code_acp"))).await?
-    } else { true };
+        with_store(path.clone(), move |store| {
+            Ok(requested_run_starts_codex(
+                &store.instance(&instance_id)?.requested,
+            ))
+        })
+        .await?
+    } else {
+        true
+    };
     let _spawn_guard = workspace_session_spawn_lock().lock().await;
     let session = if start_codex {
         let (default_bin, codex_args) = {
             let settings = app_settings.lock().await;
-            (settings.codex_bin.clone(), resolve_workspace_codex_args(&entry, Some(&parent_entry), Some(&settings)))
+            (
+                settings.codex_bin.clone(),
+                resolve_workspace_codex_args(&entry, Some(&parent_entry), Some(&settings)),
+            )
         };
         let codex_home = resolve_workspace_codex_home(&entry, Some(&parent_entry));
         let identity = serde_json::json!({"executable":default_bin.as_deref().unwrap_or("codex"),"args":codex_args,"home":codex_home});
         let existing_session = take_compatible_session(sessions, &identity).await;
-        Some(if let Some(existing_session) = existing_session { existing_session } else {
+        Some(if let Some(existing_session) = existing_session {
+            existing_session
+        } else {
             spawn_session(entry.clone(), default_bin, codex_args, codex_home).await?
         })
-    } else { None };
+    } else {
+        None
+    };
 
     {
         let mut workspaces = workspaces.lock().await;
@@ -276,7 +330,9 @@ where
 
     let connected = session.is_some();
     if let Some(session) = session {
-        session.register_workspace_with_path(&entry.id, Some(&entry.path)).await;
+        session
+            .register_workspace_with_path(&entry.id, Some(&entry.path))
+            .await;
         sessions.lock().await.insert(entry.id.clone(), session);
     }
 
@@ -290,11 +346,37 @@ where
         worktree: entry.worktree,
         settings: entry.settings,
     };
-    if let Some((path,_,operation_id,_))=tracking {
-        let receipt=serde_json::to_value(&info).map_err(|e|e.to_string())?;
-        with_store(path,move |store|store.finish_operation(&operation_id,receipt,|i|{i.preparation="workspace_created".into();Ok(())})).await?;
+    if let Some((path, _, operation_id, _)) = tracking {
+        let receipt = serde_json::to_value(&info).map_err(|e| e.to_string())?;
+        with_store(path, move |store| {
+            store.finish_operation(&operation_id, receipt, |i| {
+                i.preparation = "workspace_created".into();
+                Ok(())
+            })
+        })
+        .await?;
     }
     Ok(info)
+}
+
+#[cfg(test)]
+mod runtime_selection_tests {
+    use super::requested_run_starts_codex;
+    use serde_json::json;
+
+    #[test]
+    fn only_acp_run_instances_skip_codex_session_spawn() {
+        assert!(!requested_run_starts_codex(
+            &json!({"runtime":{"kind":"acp"}})
+        ));
+        assert!(!requested_run_starts_codex(
+            &json!({"runtime":{"kind":"open_code_acp"}})
+        ));
+        assert!(requested_run_starts_codex(
+            &json!({"runtime":{"kind":"codex"}})
+        ));
+        assert!(requested_run_starts_codex(&json!({})));
+    }
 }
 
 pub(crate) async fn remove_worktree_core<FRunGit, FutRunGit, FIsMissing, FRemoveDirAll>(

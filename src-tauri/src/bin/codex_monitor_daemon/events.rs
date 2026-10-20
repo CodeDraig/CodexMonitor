@@ -12,6 +12,9 @@ pub(super) struct DaemonEventSink {
 pub(super) enum DaemonEvent {
     Runtime(serde_json::Value),
     AppServer(AppServerEvent),
+    ResyncRequired {
+        stream: String,
+    },
     #[allow(dead_code)]
     TerminalOutput(TerminalOutput),
     #[allow(dead_code)]
@@ -22,7 +25,9 @@ impl EventSink for DaemonEventSink {
     fn run_store_path(&self) -> Option<PathBuf> {
         Some(self.run_store_path.clone())
     }
-    fn emit_runtime_event(&self, event: serde_json::Value) { let _ = self.tx.send(DaemonEvent::Runtime(event)); }
+    fn emit_runtime_event(&self, event: serde_json::Value) {
+        let _ = self.tx.send(DaemonEvent::Runtime(event));
+    }
     fn emit_app_server_event(&self, event: AppServerEvent) {
         let _ = self.tx.send(DaemonEvent::AppServer(event));
     }

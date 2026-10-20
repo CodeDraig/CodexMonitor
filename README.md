@@ -4,7 +4,7 @@
 
 ![CodexMonitor](screenshot.png)
 
-CodexMonitor is a Tauri app for orchestrating multiple Codex agents across local workspaces. It provides a sidebar to manage projects, a home screen for quick actions, and a conversation view backed by the Codex app-server protocol.
+CodexMonitor orchestrates Codex and configured ACP agents across local workspaces. Desktop has a Rust/egui frontend and a Tauri/React compatibility frontend; the existing Tauri/React path also remains the iOS app. Both desktop hosts use the shared Rust runtime and data stores.
 
 ## Features
 
@@ -50,7 +50,7 @@ CodexMonitor is a Tauri app for orchestrating multiple Codex agents across local
 
 ## Requirements
 
-- Node.js + npm
+- Node.js + npm (for the Tauri/React compatibility frontend and existing iOS frontend; not required by the native Rust desktop build)
 - Rust toolchain (stable)
 - CMake (required for native dependencies; dictation/Whisper uses it)
 - LLVM/Clang (required on Windows to build dictation dependencies via bindgen)
@@ -89,6 +89,63 @@ Run in dev mode:
 ```bash
 npm run tauri:dev
 ```
+
+## Native Rust Desktop Preview
+
+The native desktop implementation uses Rust, egui/eframe, and the wgpu renderer. `codex_monitor_native` is a separate binary; it does not load the React frontend or generated Tauri assets. The existing Tauri/React desktop path and its iOS development/release scripts remain available.
+
+The native host starts from `HostPaths` and `CoreState` in `src-tauri/src/shared/host_core.rs`. Its typed `BackendHandle` boundary (`src-tauri/src/client/`) routes local requests into the shared Rust cores and remote requests to the daemon over the existing JSON-RPC transport. The daemon uses the shared process state and domain cores; managed-daemon lifecycle logic is in `src-tauri/src/shared/managed_daemon_core.rs`, called by both the native platform service and Tauri adapters. Native window/OS services are in `src-tauri/src/desktop/platform.rs`; UI state and drawing are under `src-tauri/src/desktop/`.
+
+Cargo feature boundaries:
+
+- The default `tauri-host` feature builds the existing Tauri host and its plugins. The `codex-monitor` binary requires this feature; `custom-protocol` extends this path for packaged Tauri builds.
+- `native-gui` enables egui/eframe, wgpu, native desktop UI/rendering and OS integrations. The `codex_monitor_native` binary requires it. Native builds turn off defaults, so Tauri/webview crates and frontend assets are not part of the native package graph; `scripts/build-native.sh` checks that graph before building.
+- `native-acceptance` extends `native-gui` with eframe inspection support for Rust UI/controller tests.
+
+The Rust-only preview build needs Rust 1.95 or newer, Python 3, CMake and the platform development libraries used by the native dependency graph. Linux CI installs CMake, pkg-config, ALSA, libclang, libudev, Wayland, X11 and xkbcommon development packages. Windows CI installs CMake and LLVM/Clang. This path does not need Node.js or npm; the existing Tauri/React and iOS workflows still do.
+
+Build a native package without invoking npm, Vite, Tauri, or webview asset generation:
+
+```bash
+./scripts/build-native.sh --output-dir /tmp/codex-monitor-native-preview
+```
+
+The command builds `codex_monitor_native`, `codex_monitor_daemon`, and `codex_monitor_daemonctl` with `--no-default-features --features native-gui`, checks the active Cargo dependency graph for Tauri/webview crates, stages the three executables and platform resources, validates staged file hashes and launcher identity, and writes an unsigned package manifest beside the archive. Linux and Windows use an extracted bundle with `bin/` executables and icons; macOS uses a `.app` bundle. Existing staging directories and archives are not overwritten, so choose a new output directory for each build.
+
+For a disposable local data directory, launch the debug binary with:
+
+```bash
+test_data_dir="$(mktemp -d)"
+cargo run --manifest-path src-tauri/Cargo.toml --locked \
+  --no-default-features --features native-gui \
+  --bin codex_monitor_native -- --data-dir "$test_data_dir"
+```
+
+The native preview does not replace or modify the installed application or desktop launcher. CI is configured to build native packages on Linux, macOS, and Windows; actual native acceptance by platform is recorded separately. The workflow-dispatch release workflow also emits unsigned native preview artifacts; these are separate from the existing signed Tauri release and updater channel. Native package manifests identify target, architecture, format, version, archive hash, and signature status. A null signature means the package is not eligible for a signed updater flow.
+
+The UI embeds egui's default Ubuntu Light and Hack fonts plus its small special-icon font. Font-family settings can load a matching system font through fontique; unavailable fonts fall back to egui's embedded faces. Packages include the applicable font license and attribution texts, plus application icons. They do not contain a web frontend.
+
+Linux bundles include a desktop-entry template whose `@BUNDLE_PREFIX@` paths must be rendered for the extracted bundle location. Generate an absolute-prefix entry with:
+
+```bash
+python3 scripts/package-native.py \
+  --write-linux-desktop-entry \
+  --prefix /path/to/extracted/CodexMonitor-<version>-linux-<architecture> \
+  --desktop-entry-output /path/to/task-owned/codex-monitor-native.desktop
+```
+
+The command writes only the requested output file and refuses to overwrite it. It does not register or install a desktop entry. Native CI includes a package smoke test; interactive desktop acceptance status and artifacts are recorded separately in `docs/native-egui-acceptance.md`.
+
+For a host-independent check and the native controller/UI contract tests used by CI:
+
+```bash
+cd src-tauri
+cargo check --locked --no-default-features --lib
+cargo test --locked --no-default-features \
+  --features native-acceptance --lib --bin codex_monitor_native
+```
+
+For the Rust feature boundaries and module ownership, see `docs/codebase-map.md`.
 
 ## iOS Support (WIP)
 
@@ -290,9 +347,12 @@ src/
   types.ts          shared types
 src-tauri/
   src/lib.rs        Tauri app backend command registry
+  src/bin/codex_monitor_native.rs  egui/wgpu native desktop entrypoint
   src/bin/codex_monitor_daemon.rs  remote daemon JSON-RPC process
   src/bin/codex_monitor_daemon/rpc/  daemon RPC domain handlers
   src/shared/       shared backend core used by app + daemon
+  src/client/       typed local/daemon backend request and event boundary
+  src/desktop/      native egui app, controller, rendering, and platform services
   src/shared/git_ui_core/      git/github shared core modules
   src/shared/workspaces_core/  workspace/worktree shared core modules
   src/workspaces/   workspace/worktree adapters

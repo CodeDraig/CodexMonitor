@@ -1,4 +1,5 @@
 import {isAcpConversation} from "@/features/runtime/conversationIdentity";
+import {subscribeBackendResync} from "@services/events";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import * as Sentry from "@sentry/react";
 import type {
@@ -586,6 +587,19 @@ export function useThreads({
     onSubagentThreadDetected,
     onThreadCodexMetadataDetected,
   });
+
+  useEffect(() => subscribeBackendResync(() => {
+    if (!activeWorkspace?.connected || !activeThreadId || isAcpConversation(activeThreadId)) return;
+    void refreshThread(activeWorkspace.id, activeThreadId).catch((error) => {
+      onDebug?.({
+        id: `${Date.now()}-backend-resync-thread-refresh-error`,
+        timestamp: Date.now(),
+        source: "error",
+        label: "backend event resync error",
+        payload: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }), [activeWorkspace?.connected, activeWorkspace?.id, activeThreadId, onDebug, refreshThread]);
 
   const ensureWorkspaceRuntimeCodexArgsBestEffort = useCallback(
     async (workspaceId: string, threadId: string | null, phase: string) => {

@@ -97,6 +97,74 @@ jobs:
         run: cargo test
         working-directory: src-tauri
 
+  build-native:
+    name: Native Rust package (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macOS
+            os: macos-latest
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-native-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-native-
+      - name: Install native build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            libasound2-dev \
+            libclang-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+      - name: Install LLVM (Windows)
+        if: runner.os == 'Windows'
+        run: choco install cmake llvm -y --no-progress
+      - name: Configure LLVM (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+          echo "C:\\Program Files\\LLVM\\bin" >> "$GITHUB_PATH"
+      - name: Check host-independent Rust core
+        run: cargo check --locked --no-default-features --lib
+        working-directory: src-tauri
+      - name: Test native desktop controller and UI contracts
+        run: cargo test --locked --no-default-features --features native-acceptance --lib --bin codex_monitor_native
+        working-directory: src-tauri
+      - name: Build and smoke-test native package
+        shell: bash
+        run: scripts/build-native.sh --output-dir "$RUNNER_TEMP/codex-monitor-native"
+      - name: Upload native package
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform.name }}
+          path: ${{ runner.temp }}/codex-monitor-native/*
+          if-no-files-found: error
+
   build-tauri:
     name: Tauri build (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.os }}

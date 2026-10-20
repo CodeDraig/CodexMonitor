@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 pub(crate) type Result<T> = std::result::Result<T, String>;
 const BUSY_PREFIX: &str = "Run store busy: ";
+const OPEN_RETRY_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
+const OPEN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
 pub(crate) fn error(e: impl std::error::Error + 'static) -> String {
     if (&e as &dyn std::error::Error)
         .downcast_ref::<rusqlite::Error>()
@@ -32,6 +34,23 @@ pub(crate) struct Store {
 }
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
+        // Multiple desktop/daemon workers can be the first process to touch a
+        // fresh store at once. SQLite cannot always wait through the
+        // journal_mode=WAL transition, so retry only SQLITE_BUSY from the
+        // open/bootstrap path. Normal schema-3 reads still open without taking
+        // a writer lock, and all non-contention failures remain immediate.
+        let deadline = std::time::Instant::now() + OPEN_RETRY_WINDOW;
+        loop {
+            match Self::open_once(path) {
+                Err(err) if is_busy(&err) && std::time::Instant::now() < deadline => {
+                    std::thread::sleep(OPEN_RETRY_DELAY);
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn open_once(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(error)?;
         }

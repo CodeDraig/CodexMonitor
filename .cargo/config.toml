@@ -1,0 +1,5 @@
+[env]
+# whisper-rs 0.12's generated bindings become opaque under this host's
+# bindgen/libclang parse. The bundled bindings match the crate's C header and
+# have already been used for successful CodexMonitor desktop builds.
+WHISPER_DONT_GENERATE_BINDINGS = "1"

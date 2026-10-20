@@ -1,25 +1,36 @@
 pub(crate) mod account;
+pub(crate) mod agent_runtime;
 pub(crate) mod agents_config_core;
 pub(crate) mod codex_aux_core;
 pub(crate) mod codex_core;
 pub(crate) mod codex_update_core;
 pub(crate) mod config_toml_core;
+#[cfg(all(
+    not(any(target_os = "ios", target_os = "android")),
+    any(feature = "tauri-host", feature = "native-gui")
+))]
+pub(crate) mod dictation_core;
 pub(crate) mod files_core;
 pub(crate) mod git_core;
 pub(crate) mod git_rpc;
 pub(crate) mod git_ui_core;
+pub(crate) mod host_core;
 pub(crate) mod local_usage_core;
+#[cfg(any(feature = "tauri-host", feature = "native-gui"))]
+pub(crate) mod managed_daemon_core;
+pub(crate) mod notifications_core;
 pub(crate) mod process_core;
 pub(crate) mod prompts_core;
+pub(crate) mod remote_settings;
+pub(crate) mod runs_core;
+pub(crate) mod runs_rpc;
+pub(crate) mod runtime_rpc;
 pub(crate) mod session_activity;
 pub(crate) mod settings_core;
+#[cfg(any(feature = "tauri-host", feature = "native-gui"))]
+pub(crate) mod terminal_core;
+pub(crate) mod ui_state_core;
+pub(crate) mod workspace_files_core;
 pub(crate) mod workspace_rpc;
 pub(crate) mod workspaces_core;
 pub(crate) mod worktree_core;
-pub(crate) mod runs_core;
-pub(crate) mod runs_rpc;
-pub(crate) mod remote_settings;
-pub(crate) mod workspace_files_core;
-pub(crate) mod notifications_core;
-pub(crate) mod agent_runtime;
-pub(crate) mod runtime_rpc;

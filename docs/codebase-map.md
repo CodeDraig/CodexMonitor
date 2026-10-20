@@ -7,6 +7,26 @@ Related docs:
 - Setup/build/release: `README.md`
 - iOS remote over Tailscale (TCP): `docs/mobile-ios-tailscale-blueprint.md`
 
+## Desktop Host Paths
+
+Desktop currently has two frontend hosts. The native Rust desktop is the native desktop target; Tauri/React remains the compatibility desktop frontend and the existing iOS app path. The iOS app has not been replaced by the egui target.
+
+- Tauri + React desktop and iOS: `src-tauri/src/lib.rs`, `src/`, and `src/services/tauri.ts`.
+- Native Rust desktop entrypoint: `src-tauri/src/bin/codex_monitor_native.rs`, with app/controller/content/workbench UI under `src-tauri/src/desktop/`. It uses egui/eframe with wgpu and does not load generated web assets.
+- Shared path resolution and process state: `src-tauri/src/shared/host_core.rs` (`HostPaths`, `CoreState`). The native desktop and daemon use this initialization and the existing workspace/settings/run-store locations.
+- Typed request/event boundary: `src-tauri/src/client/contracts.rs`, `events.rs`, `local.rs`, and `remote.rs`. `BackendScope` carries endpoint, connection epoch, and store identity; `BackendHandle` dispatches local operations to shared cores and remote operations over daemon JSON-RPC.
+- Native desktop orchestration and drawing: `src-tauri/src/desktop/controller.rs`, `app.rs`, `content/`, and `workbench/`.
+- Native window, file picker, clipboard, audio, and platform services: `src-tauri/src/desktop/platform.rs` and `src-tauri/src/desktop/platform/*`.
+- Shared terminal model and versioned UI state: `src-tauri/src/shared/terminal_core.rs`, `src-tauri/src/shared/ui_state_core.rs`, and `src-tauri/src/ui_state.rs`.
+- Shared managed-daemon lifecycle used by native platform code and Tauri adapters: `src-tauri/src/shared/managed_daemon_core.rs`, `src-tauri/src/desktop/platform.rs`, `src-tauri/src/tailscale/`, and `src-tauri/src/state.rs`.
+- Native package staging and active dependency-graph check: `scripts/build-native.sh` and `scripts/package-native.py`.
+
+Build a native preview with `scripts/build-native.sh --output-dir <new-path>`. The script builds with `--locked --no-default-features --features native-gui`, checks that the active normal/build dependency graph excludes Tauri and webview crates, builds the native app plus daemon and daemon-control binaries, and stages icons, font-license resources, platform launch metadata, and an unsigned package manifest. It does not run npm or change the installed app. On Linux the bundle has a desktop-entry template with `@BUNDLE_PREFIX@` placeholders; render an absolute-prefix entry for an extracted bundle with `scripts/package-native.py --write-linux-desktop-entry --prefix <bundle-path> --desktop-entry-output <new-entry-path>`. This writes the specified entry but does not install/register it. The package uses egui's embedded default fonts, fontique-backed system font lookup, and fallback to the embedded fonts when a configured system face is unavailable; applicable font licenses and attributions are staged with the app. The separate Tauri build scripts remain the iOS and compatibility path. Native preview artifacts are unsigned and use a channel separate from Tauri updater metadata.
+
+Cargo features are declared in `src-tauri/Cargo.toml`: default `tauri-host` enables Tauri/plugins and the `codex-monitor` binary; `native-gui` enables egui/eframe, wgpu, native controls/rendering, and related desktop integrations; `native-acceptance` adds eframe inspection support for UI/controller tests. The existing Tauri `custom-protocol` feature extends `tauri-host`. Native GUI builds use `--no-default-features` so the Tauri host is absent from the active native package graph. Native build dependencies and reproducible commands are listed in `README.md`.
+
+For desktop backend changes, keep cross-host behavior in `src-tauri/src/shared/*`; route local and daemon operations through `src-tauri/src/client/*`; keep native window/OS integration in `src-tauri/src/desktop/platform.rs`; keep drawing and UI state transitions in `src-tauri/src/desktop/*`. The eframe frame function reads state and issues actions; asynchronous backend work goes through the client/event bridge. The legacy Tauri path continues through `src-tauri/src/lib.rs`, app adapters, `src/services/tauri.ts`, and the React feature tree.
+
 ## Start Here: How Changes Flow
 
 For backend behavior, follow this path in order:
@@ -26,6 +46,12 @@ If a behavior must work in both app and daemon, implement it in `src-tauri/src/s
 
 | Need | Primary files to edit |
 | --- | --- |
+| Change native desktop UI composition, sidebar, or dialogs | `src-tauri/src/desktop/app.rs`, `src-tauri/src/desktop/app/*` |
+| Change native message rendering, markdown, or diffs | `src-tauri/src/desktop/content.rs`, `src-tauri/src/desktop/content/*` |
+| Change native backend orchestration, requests, or event application | `src-tauri/src/desktop/controller.rs`, `src-tauri/src/desktop/controller/*`, `src-tauri/src/client/contracts.rs`, `src-tauri/src/client/events.rs` |
+| Change native local or daemon backend transport | `src-tauri/src/client/local.rs`, `src-tauri/src/client/remote.rs`, `src-tauri/src/client/mod.rs` |
+| Change native window, OS, tray, or host services | `src-tauri/src/desktop/platform.rs`, `src-tauri/src/desktop/platform/*` |
+| Change native package layout, launcher metadata, or package smoke checks | `scripts/build-native.sh`, `scripts/package-native.py`, `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 | App-level UI composition/layout wiring | `src/App.tsx`, `src/features/app/components/AppLayout.tsx`, `src/features/app/bootstrap/*`, `src/features/app/orchestration/*`, `src/features/app/hooks/*` |
 | Add/change Tauri IPC methods used by frontend | `src/services/tauri.ts`, `src-tauri/src/lib.rs`, matching backend adapter module |
 | Add/change app-server event handling in UI | `src/services/events.ts`, `src/features/app/hooks/useAppServerEvents.ts`, `src/utils/appServerEvents.ts`, `src/features/threads/utils/threadNormalize.ts` |
@@ -131,6 +157,10 @@ All cross-runtime domain behavior belongs in `src-tauri/src/shared/*`:
 - Prompts CRUD/listing: `src-tauri/src/shared/prompts_core.rs`
 - Usage snapshot and aggregation: `src-tauri/src/shared/local_usage_core.rs`
 - Process helpers: `src-tauri/src/shared/process_core.rs`
+- Process paths and shared host state (`HostPaths`, `CoreState`): `src-tauri/src/shared/host_core.rs`
+- Managed daemon/Tailscale lifecycle shared with Tauri host adapters: `src-tauri/src/shared/managed_daemon_core.rs`
+- Native terminal emulator model: `src-tauri/src/shared/terminal_core.rs`
+- Versioned native presentation state: `src-tauri/src/shared/ui_state_core.rs`, `src-tauri/src/ui_state.rs`
 
 ## Events Map (Backend -> Frontend)
 

@@ -6,7 +6,7 @@ import {conversationKey} from "../conversationIdentity";
 import {useAcpConversations} from "./useAcpConversations";
 import type {ExecutionTicket,RuntimeSession} from "../types";
 vi.mock("@services/tauri",()=>({runtimeRequest:vi.fn()}));
-vi.mock("@services/events",()=>({subscribeRuntimeEvents:vi.fn(()=>()=>{})}));
+vi.mock("@services/events",()=>({subscribeRuntimeEvents:vi.fn(()=>()=>{}),subscribeBackendResync:vi.fn(()=>()=>{})}));
 const journal=vi.hoisted(()=>({executions:[] as ExecutionTicket[],events:[],error:null,reload:vi.fn()}));
 vi.mock("./useRuntimeConversation",()=>({useRuntimeConversation:()=>journal}));
 const session:RuntimeSession={storeId:"store",runtime:{profileId:"generic",profileRevision:1,kind:"acp"},sessionId:"session",nativeSessionId:"native-id",workspaceId:"w",cwd:"/remote/repo",profile:{id:"generic",revision:1,name:"Independent",kind:"acp",executable:"agent",args:["--protocol"]},capabilities:{loadSession:true,sessionDiscovery:true,images:true,configuration:false,cancellation:true,steering:false,permissions:true},configuration:{},agentInfo:{agentInfo:{name:"Independent"}}};

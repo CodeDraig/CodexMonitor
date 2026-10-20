@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { AppServerEvent } from "../types";
 import {
   subscribeAppServerEvents,
+  subscribeBackendResync,
   subscribeMenuCycleCollaborationMode,
   subscribeMenuCycleModel,
   subscribeMenuNewAgent,
@@ -43,6 +44,23 @@ describe("events subscriptions", () => {
     listener(event);
     expect(onEvent).toHaveBeenCalledWith(payload);
 
+    cleanup();
+    await Promise.resolve();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers backend resync notifications to subscribers", async () => {
+    let listener: EventCallback<{stream?: string}> = () => {};
+    const unlisten = vi.fn();
+    vi.mocked(listen).mockImplementation((_event, handler) => {
+      if (_event === "backend-resync-required") listener = handler as EventCallback<{stream?: string}>;
+      return Promise.resolve(_event === "backend-resync-required" ? unlisten : vi.fn());
+    });
+    const onEvent = vi.fn();
+    const cleanup = subscribeBackendResync(onEvent);
+    const payload = {stream: "all"};
+    listener({event: "backend-resync-required", id: 1, payload});
+    expect(onEvent).toHaveBeenCalledWith(payload);
     cleanup();
     await Promise.resolve();
     expect(unlisten).toHaveBeenCalledTimes(1);
