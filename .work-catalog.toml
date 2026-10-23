@@ -1,0 +1,13 @@
+# Project metadata for work-catalog. Edit deliberately; refresh imports changes.
+schema_version = 1
+
+[project]
+id = "codexmonitor-70bf9fa9"
+purpose = "Native Rust/egui workbench for Codex and ACP agents, including remote daemon execution."
+state = "archived"
+next_action = "The only observed status entries are two untracked __pycache__ directories; do not describe these as an unfinished implementation."
+tags = ["xint"]
+
+[annotations]
+tags = []
+note = ""
